@@ -37,11 +37,11 @@ class SleepMonitorService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (!running) startCapture()
+        if (!running) startCapture(intent?.getLongExtra(EXTRA_DELAY_MS, 0L) ?: 0L)
         return START_NOT_STICKY
     }
 
-    private fun startCapture() {
+    private fun startCapture(delayMs: Long = 0L) {
         createChannel()
         val openApp = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -51,7 +51,7 @@ class SleepMonitorService : Service() {
             Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("Sleep Monitor đang giám sát")
-                .setContentText("Đang phân tích âm thanh trên thiết bị · Chỉ lưu đoạn sự kiện")
+                .setContentText(if (delayMs > 0) "Sẽ bắt đầu phân tích sau 5 phút · Chỉ lưu đoạn sự kiện" else "Đang phân tích âm thanh trên thiết bị · Chỉ lưu đoạn sự kiện")
                 .setContentIntent(openApp)
                 .setOngoing(true)
                 .build()
@@ -60,7 +60,7 @@ class SleepMonitorService : Service() {
             Notification.Builder(this)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("Sleep Monitor đang giám sát")
-                .setContentText("Chỉ lưu đoạn âm thanh sự kiện")
+                .setContentText(if (delayMs > 0) "Sẽ bắt đầu sau 5 phút" else "Chỉ lưu đoạn âm thanh sự kiện")
                 .setContentIntent(openApp)
                 .setOngoing(true)
                 .build()
@@ -81,8 +81,17 @@ class SleepMonitorService : Service() {
 
         running = true
         worker = Thread({
-            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-            captureLoop()
+            if (delayMs > 0) {
+                val deadline = System.currentTimeMillis() + delayMs
+                while (running && System.currentTimeMillis() < deadline) {
+                    try { Thread.sleep(minOf(500L, deadline - System.currentTimeMillis())) }
+                    catch (_: InterruptedException) { return@Thread }
+                }
+            }
+            if (running) {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+                captureLoop()
+            }
         }, "SleepMonitor-Audio").also { it.start() }
     }
 
@@ -248,6 +257,7 @@ class SleepMonitorService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.donglq.sleepmonitor.STOP_MONITOR"
+        const val EXTRA_DELAY_MS = "extra_delay_ms"
         const val PREFS = "sleep_monitor_preferences"
         private const val CHANNEL_ID = "sleep_monitor_capture"
         private const val NOTIFICATION_ID = 7102
