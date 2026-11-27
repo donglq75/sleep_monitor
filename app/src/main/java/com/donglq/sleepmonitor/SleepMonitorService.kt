@@ -79,11 +79,11 @@ class SleepMonitorService : Service() {
             it.acquire()
         }
 
+        running = true
         worker = Thread({ captureLoop() }, "SleepMonitor-Audio").also {
             it.priority = Process.THREAD_PRIORITY_AUDIO
             it.start()
         }
-        running = true
     }
 
     private fun captureLoop() {
