@@ -263,7 +263,7 @@ private fun SoundsScreen(onBack: () -> Unit) {
         }
         Text(message, style = MaterialTheme.typography.bodyMedium)
         Text(
-            "Tệp và thời lượng được ghi nhớ trên máy. Bản thử nghiệm chưa tự chuyển sang giám sát; bạn chủ động bật giám sát ở mục 2.",
+            "Tệp và thời lượng được ghi nhớ trên máy. Muốn theo dõi ngay từ lúc nghe nhạc, hãy bật giám sát ở mục 2 trước, sau đó quay lại đây phát nhạc; giám sát vẫn chạy khi bạn đổi trang.",
             style = MaterialTheme.typography.bodySmall
         )
     }
@@ -325,7 +325,7 @@ private fun MonitorScreen(onBack: () -> Unit) {
             }
         }
         Text("Cách hoạt động", style = MaterialTheme.typography.titleMedium)
-        Text("Ứng dụng phân tích âm thanh microphone ở 16 kHz. Khi có đoạn âm thanh lớn liên tiếp vượt ngưỡng, ứng dụng lưu một clip gồm khoảng 10 giây trước sự kiện và 12 giây sau sự kiện.")
+        Text("Bạn nên bật giám sát trước khi phát nhạc: sau khi bấm Bắt đầu giám sát, quay lại mục 1 để phát nhạc. Dịch vụ vẫn chạy khi đổi trang hoặc tắt màn hình. Ứng dụng phân tích microphone ở 16 kHz; khi âm thanh lớn liên tiếp vượt ngưỡng, ứng dụng lưu clip gồm khoảng 10 giây trước và 12 giây sau sự kiện.")
         Text("Khử vọng âm (AEC) và giảm nhiễu (nếu máy hỗ trợ) được bật để hạn chế âm thanh từ nhạc đang phát lọt vào nhận diện.")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
