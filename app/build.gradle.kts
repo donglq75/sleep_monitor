@@ -16,6 +16,32 @@ android {
         versionName = "1.0.1"
     }
 
+    signingConfigs {
+        val stableDebugStore = System.getenv("SLEEP_MONITOR_KEYSTORE_PATH")
+        val stableDebugPassword = System.getenv("SLEEP_MONITOR_KEYSTORE_PASSWORD")
+        val stableDebugAlias = System.getenv("SLEEP_MONITOR_KEY_ALIAS")
+        val stableDebugKeyPassword = System.getenv("SLEEP_MONITOR_KEY_PASSWORD")
+        if (!stableDebugStore.isNullOrBlank() && file(stableDebugStore).exists() &&
+            !stableDebugPassword.isNullOrBlank() && !stableDebugAlias.isNullOrBlank() &&
+            !stableDebugKeyPassword.isNullOrBlank()
+        ) {
+            create("stableDebug") {
+                storeFile = file(stableDebugStore)
+                storePassword = stableDebugPassword
+                keyAlias = stableDebugAlias
+                keyPassword = stableDebugKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            if (signingConfigs.findByName("stableDebug") != null) {
+                signingConfig = signingConfigs.getByName("stableDebug")
+            }
+        }
+    }
+
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
