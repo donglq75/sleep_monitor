@@ -97,7 +97,7 @@ class SleepMonitorService : Service() {
         }
         val bufferBytes = maxOf(minBuffer * 2, 8192)
         val audio = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
