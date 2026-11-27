@@ -146,6 +146,7 @@ private fun HomeScreen(
     onClearBackground: () -> Unit,
     hasBackground: Boolean
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier.fillMaxSize().padding(22.dp),
         verticalArrangement = Arrangement.Center,
