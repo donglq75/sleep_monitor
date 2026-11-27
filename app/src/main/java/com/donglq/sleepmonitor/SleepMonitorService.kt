@@ -188,7 +188,7 @@ class SleepMonitorService : Service() {
         if (pcm.isEmpty()) return
         try {
             val folder = File(filesDir, "events").apply { mkdirs() }
-            val file = File(folder, "event_${System.currentTimeMillis()}.wav")
+            val file = File(folder, "event_${timestamp}.wav")
             FileOutputStream(file).use { out ->
                 val dataLength = pcm.size
                 val header = ByteArray(44)
