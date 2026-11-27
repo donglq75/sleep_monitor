@@ -130,6 +130,7 @@ class SleepMonitorService : Service() {
         var loudBlocks = 0
         var eventBuffer: ByteArrayOutputStream? = null
         var postSamplesLeft = 0
+        var eventTimestamp = 0L
         var cooldownUntil = 0L
 
         while (running && !Thread.currentThread().isInterrupted) {
@@ -155,14 +156,16 @@ class SleepMonitorService : Service() {
                 val output = ByteArrayOutputStream()
                 for (oldChunk in preRoll) writePcm(output, oldChunk)
                 eventBuffer = output
+                eventTimestamp = now
                 postSamplesLeft = sampleRate * 12
                 loudBlocks = 0
             } else if (eventBuffer != null) {
                 writePcm(eventBuffer!!, chunk)
                 postSamplesLeft -= count
                 if (postSamplesLeft <= 0) {
-                    saveWav(eventBuffer!!.toByteArray())
+                    saveWav(eventBuffer!!.toByteArray(), eventTimestamp)
                     eventBuffer = null
+                    eventTimestamp = 0L
                     cooldownUntil = now + 20_000L
                 }
             }
@@ -171,7 +174,7 @@ class SleepMonitorService : Service() {
         try { if (audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) audio.stop() } catch (_: Exception) { }
         audio.release()
         if (recorder === audio) recorder = null
-        eventBuffer?.let { saveWav(it.toByteArray()) }
+        eventBuffer?.let { saveWav(it.toByteArray(), eventTimestamp) }
     }
 
     private fun writePcm(out: ByteArrayOutputStream, samples: ShortArray) {
@@ -181,7 +184,7 @@ class SleepMonitorService : Service() {
         }
     }
 
-    private fun saveWav(pcm: ByteArray) {
+    private fun saveWav(pcm: ByteArray, timestamp: Long) {
         if (pcm.isEmpty()) return
         try {
             val folder = File(filesDir, "events").apply { mkdirs() }
