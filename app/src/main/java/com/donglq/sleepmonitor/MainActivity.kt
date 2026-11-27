@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -41,7 +42,10 @@ class MainActivity : ComponentActivity() {
 private fun SleepMonitorApp() {
     var screen by remember { mutableStateOf(Screen.HOME) }
     MaterialTheme(colorScheme = darkColorScheme()) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Surface(
+            modifier = Modifier.fillMaxSize().statusBarsPadding(),
+            color = MaterialTheme.colorScheme.background
+        ) {
             when (screen) {
                 Screen.HOME -> HomeScreen(
                     onSounds = { screen = Screen.SOUNDS },
