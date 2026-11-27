@@ -24,11 +24,54 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Build debug APK (temporary runner key)
+
+      # Forked pull requests do not receive repository secrets. They use the
+      # normal temporary debug key; pushes and manual runs must use the stable key.
+      - name: Restore and validate stable signing key
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SLEEP_MONITOR_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.SLEEP_MONITOR_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Missing SLEEP_MONITOR_KEYSTORE_BASE64 secret}"
+          : "${KEYSTORE_PASSWORD:?Missing SLEEP_MONITOR_KEYSTORE_PASSWORD secret}"
+          KEYSTORE_PATH="$RUNNER_TEMP/sleepmonitor.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          test -s "$KEYSTORE_PATH"
+          # Check the keystore password and the expected alias without printing secrets.
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias sleepmonitor >/dev/null
+          chmod 600 "$KEYSTORE_PATH"
+          echo "SLEEP_MONITOR_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          echo "SLEEP_MONITOR_KEY_ALIAS=sleepmonitor" >> "$GITHUB_ENV"
+
+      - name: Build APK with stable signing key
+        if: github.event_name != 'pull_request'
+        env:
+          SLEEP_MONITOR_KEYSTORE_PASSWORD: ${{ secrets.SLEEP_MONITOR_KEYSTORE_PASSWORD }}
+          SLEEP_MONITOR_KEY_PASSWORD: ${{ secrets.SLEEP_MONITOR_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${SLEEP_MONITOR_KEY_PASSWORD:?Missing SLEEP_MONITOR_KEY_PASSWORD secret}"
+          gradle --no-daemon assembleDebug
+
+      - name: Build APK with temporary runner key (pull requests only)
+        if: github.event_name == 'pull_request'
         run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK signature
+        if: always() && (github.event_name != 'pull_request')
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: sleep-monitor-debug-temporary
+          name: sleep-monitor-debug-${{ github.event_name == 'pull_request' && 'temporary' || 'stable' }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
