@@ -539,7 +539,7 @@ private fun ReportScreen(onBack: () -> Unit) {
                     playingName = null
                     allFiles.forEach { it.delete() }
                     showDeleteConfirm = false
-                    refresh = !refresh
+                    refresh++
                 }) { Text("Xóa clip") }
             },
             dismissButton = {
