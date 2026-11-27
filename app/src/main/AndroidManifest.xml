@@ -10,6 +10,8 @@
     <application
         android:allowBackup="false"
         android:label="Sleep Monitor"
+        android:icon="@drawable/ic_launcher_legacy"
+        android:roundIcon="@drawable/ic_launcher_legacy"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
