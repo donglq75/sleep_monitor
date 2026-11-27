@@ -316,7 +316,7 @@ private fun ReportScreen(onBack: () -> Unit) {
             ?: emptyList()
     }
     val startedAt = prefs.getLong("monitor_started_at", 0L)
-    val stoppedAt = prefs.getLong("monitor_stopped_at", System.currentTimeMillis())
+    val stoppedAt = if (prefs.getBoolean("monitor_running", false)) System.currentTimeMillis() else prefs.getLong("monitor_stopped_at", System.currentTimeMillis())
     val sessionEnd = maxOf(startedAt + 1L, stoppedAt)
     val sessionFiles = allFiles.filter { file ->
         val timestamp = file.nameWithoutExtension.substringAfter("event_", "").toLongOrNull() ?: 0L
@@ -347,17 +347,19 @@ private fun ReportScreen(onBack: () -> Unit) {
         }
         Text("Dòng thời gian sự kiện", style = MaterialTheme.typography.titleMedium)
         if (startedAt > 0L) {
+            val timelineColor = MaterialTheme.colorScheme.outline
+            val eventColor = MaterialTheme.colorScheme.primary
             Canvas(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 8.dp, vertical = 8.dp)) {
                 val y = size.height * 0.48f
                 val left = 8f
                 val right = size.width - 8f
-                drawLine(MaterialTheme.colorScheme.outline, Offset(left, y), Offset(right, y), strokeWidth = 4f, cap = StrokeCap.Round)
+                drawLine(timelineColor, Offset(left, y), Offset(right, y), strokeWidth = 4f, cap = StrokeCap.Round)
                 sessionFiles.forEach { file ->
                     val timestamp = file.nameWithoutExtension.substringAfter("event_", "").toLongOrNull() ?: return@forEach
                     val ratio = ((timestamp - startedAt).toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                     val x = left + (right - left) * ratio
-                    drawLine(MaterialTheme.colorScheme.primary, Offset(x, y - 15f), Offset(x, y + 15f), strokeWidth = 3f, cap = StrokeCap.Round)
-                    drawCircle(MaterialTheme.colorScheme.primary, radius = 5f, center = Offset(x, y))
+                    drawLine(eventColor, Offset(x, y - 15f), Offset(x, y + 15f), strokeWidth = 3f, cap = StrokeCap.Round)
+                    drawCircle(eventColor, radius = 5f, center = Offset(x, y))
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
