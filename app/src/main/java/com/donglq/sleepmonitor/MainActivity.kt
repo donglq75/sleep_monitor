@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -35,11 +36,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -47,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -308,25 +312,78 @@ private fun PlayerMonitorScreen(onReport: () -> Unit) {
 @Composable
 private fun ReportScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val allFiles = remember {
+    val prefs = remember { context.getSharedPreferences(SleepMonitorService.PREFS, Context.MODE_PRIVATE) }
+    var refresh by remember { mutableStateOf(0) }
+    val allFiles = remember(refresh) {
         File(context.filesDir, "events").walkTopDown()
             .filter { it.isFile && it.extension.equals("wav", true) }
             .toList()
-            .sortedByDescending { it.nameWithoutExtension.substringAfter("event_", "").toLongOrNull() ?: 0L }
     }
-    val grouped = remember(allFiles) {
-        allFiles.groupBy { file ->
-            val timestamp = file.nameWithoutExtension.substringAfter("event_", "").toLongOrNull() ?: file.lastModified()
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
-        }.toSortedMap(compareByDescending { it })
+    val fileByTimestamp = remember(allFiles) {
+        allFiles.mapNotNull { file ->
+            file.nameWithoutExtension.substringAfter("event_", "").toLongOrNull()?.let { it to file }
+        }.toMap()
+    }
+    val statuses = remember {
+        mutableStateMapOf<Long, String>().apply {
+            prefs.getStringSet("event_timestamps", emptySet())?.forEach { value ->
+                value.toLongOrNull()?.let { timestamp ->
+                    put(timestamp, prefs.getString("event_status_$timestamp", "pending") ?: "pending")
+                }
+            }
+        }
+    }
+    val currentFileTimestamps = fileByTimestamp.keys
+    LaunchedEffect(currentFileTimestamps) {
+        val known = prefs.getStringSet("event_timestamps", emptySet())?.toMutableSet() ?: mutableSetOf()
+        currentFileTimestamps.forEach { timestamp ->
+            known.add(timestamp.toString())
+            if (!statuses.containsKey(timestamp)) statuses[timestamp] = "pending"
+        }
+        prefs.edit().putStringSet("event_timestamps", known).apply()
+    }
+    val timestamps = remember(refresh, allFiles, statuses.size) {
+        val saved = prefs.getStringSet("event_timestamps", emptySet())?.mapNotNull { it.toLongOrNull() } ?: emptyList()
+        (saved + currentFileTimestamps).distinct().sortedDescending()
     }
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
-    var playingName by remember { mutableStateOf<String?>(null) }
+    var playingName by remember { mutableStateOf<Long?>(null) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var csvToExport by remember { mutableStateOf("") }
     val dateFormatter = remember { SimpleDateFormat("EEEE, dd/MM/yyyy", Locale.getDefault()) }
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
     val dayKeyFormatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val grouped = remember(timestamps) {
+        timestamps.groupBy { timestamp ->
+            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
+        }.toSortedMap(compareByDescending { it })
+    }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(csvToExport.toByteArray(Charsets.UTF_8))
+                }
+            } catch (error: Exception) {
+                android.widget.Toast.makeText(context, "Không xuất được tệp: ${error.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     DisposableEffect(Unit) {
-        onDispose { try { activePlayer?.release() } catch (_: Exception) { }; activePlayer = null }
+        onDispose {
+            try { activePlayer?.release() } catch (_: Exception) { }
+            activePlayer = null
+        }
+    }
+
+    fun setStatus(timestamp: Long, status: String) {
+        statuses[timestamp] = status
+        prefs.edit()
+            .putString("event_status_$timestamp", status)
+            .putStringSet("event_timestamps", (prefs.getStringSet("event_timestamps", emptySet())?.toMutableSet() ?: mutableSetOf()).apply { add(timestamp.toString()) })
+            .apply()
     }
 
     Column(
@@ -339,67 +396,155 @@ private fun ReportScreen(onBack: () -> Unit) {
         }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("Nhật ký theo ngày", style = MaterialTheme.typography.titleMedium)
-                Text("Đã ghi nhận ${allFiles.size} đoạn âm thanh trong ${grouped.size} ngày.")
-                Text("Clip được lưu theo ngày trên điện thoại; các bản ghi cũ cũng được tự nhận diện.",
-                    style = MaterialTheme.typography.bodySmall)
+                Text("Tổng quan sự kiện", style = MaterialTheme.typography.titleMedium)
+                Text("Tổng cộng ${timestamps.size} sự kiện · Còn ${allFiles.size} clip âm thanh.")
+                Text("Đã xác nhận ngáy: ${statuses.values.count { it == "snore" }} · Không phải ngáy: ${statuses.values.count { it == "not_snore" }} · Chưa xác nhận: ${timestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
+                Text("Các kết luận được lưu riêng, không mất khi xóa clip.", style = MaterialTheme.typography.bodySmall)
             }
         }
-        if (allFiles.isEmpty()) {
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Sơ đồ thời gian sự kiện", style = MaterialTheme.typography.titleMedium)
+                Text("Mỗi chấm là một sự kiện trong ngày; vị trí theo giờ ghi nhận.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("🟠 Chưa xác nhận", style = MaterialTheme.typography.labelSmall)
+                    Text("🟢 Ngáy", style = MaterialTheme.typography.labelSmall)
+                    Text("⚪ Không ngáy", style = MaterialTheme.typography.labelSmall)
+                }
+                if (grouped.isEmpty()) Text("Chưa có dữ liệu sự kiện.")
+                grouped.forEach { (dayKey, dayTimestamps) ->
+                    Text(dayKey, style = MaterialTheme.typography.labelMedium)
+                    Canvas(Modifier.fillMaxWidth().height(34.dp)) {
+                        val y = size.height / 2f
+                        drawLine(Color.Gray, Offset(0f, y), Offset(size.width, y), strokeWidth = 2.dp.toPx())
+                        dayTimestamps.forEach { timestamp ->
+                            val cal = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+                            val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+                            val x = size.width * (minuteOfDay / 1440f)
+                            val color = when (statuses[timestamp]) {
+                                "snore" -> Color(0xFF35C979)
+                                "not_snore" -> Color(0xFFB0B0B0)
+                                else -> Color(0xFFFFA726)
+                            }
+                            drawCircle(color, radius = 5.dp.toPx(), center = Offset(x.coerceIn(5.dp.toPx(), size.width - 5.dp.toPx()), y))
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("00:00", style = MaterialTheme.typography.labelSmall)
+                        Text("06:00", style = MaterialTheme.typography.labelSmall)
+                        Text("12:00", style = MaterialTheme.typography.labelSmall)
+                        Text("18:00", style = MaterialTheme.typography.labelSmall)
+                        Text("24:00", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    val header = "Thoi_gian,Ngay,Gio,Trang_thai,Ten_trang_thai,Con_clip\n"
+                    val rows = timestamps.sorted().joinToString("") { timestamp ->
+                        val status = statuses[timestamp] ?: "pending"
+                        val label = when (status) { "snore" -> "Ngáy"; "not_snore" -> "Không phải ngáy"; else -> "Chưa xác nhận" }
+                        "${timestamp},${dayKeyFormatter.format(Date(timestamp))},${timeFormatter.format(Date(timestamp))},${status},${label},${if (fileByTimestamp.containsKey(timestamp)) "Có" else "Không"}\n"
+                    }
+                    csvToExport = "\uFEFF" + header + rows
+                    exportLauncher.launch("sleep_monitor_statistics.csv")
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text("Xuất Excel/CSV") }
+            OutlinedButton(
+                onClick = { showDeleteConfirm = true },
+                enabled = allFiles.isNotEmpty(),
+                modifier = Modifier.weight(1f)
+            ) { Text("Xóa hết clip") }
+        }
+
+        if (grouped.isEmpty()) {
             Text("Chưa có sự kiện nào được ghi nhận.")
         } else {
-            grouped.forEach { (dayKey, files) ->
+            grouped.forEach { (dayKey, dayTimestamps) ->
                 val dayDate = try { dayKeyFormatter.parse(dayKey) } catch (_: Exception) { null }
-                val times = files.mapNotNull { it.nameWithoutExtension.substringAfter("event_", "").toLongOrNull() }
-                val firstTime = times.minOrNull()
-                val lastTime = times.maxOrNull()
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(dayDate?.let { dateFormatter.format(it).replaceFirstChar { c -> c.uppercase() } } ?: dayKey,
                             style = MaterialTheme.typography.titleMedium)
-                        Text("${files.size} sự kiện" +
-                            (if (firstTime != null && lastTime != null) " · ${timeFormatter.format(Date(firstTime))} – ${timeFormatter.format(Date(lastTime))}" else ""),
-                            style = MaterialTheme.typography.bodySmall)
-                        files.sortedByDescending { it.name }.forEachIndexed { index, file ->
-                            val timestamp = file.nameWithoutExtension.substringAfter("event_", "").toLongOrNull()
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Sự kiện ${files.size - index}", style = MaterialTheme.typography.bodyMedium)
-                                    Text(timestamp?.let { timeFormatter.format(Date(it)) } ?: file.name,
-                                        style = MaterialTheme.typography.bodySmall)
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(onClick = {
-                                        try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
-                                        activePlayer = MediaPlayer.create(context, Uri.fromFile(file))
-                                        if (activePlayer != null) {
-                                            playingName = file.name
-                                            activePlayer?.setOnCompletionListener {
-                                                try { it.release() } catch (_: Exception) { }
-                                                activePlayer = null
-                                                playingName = null
+                        Text("${dayTimestamps.size} sự kiện", style = MaterialTheme.typography.bodySmall)
+                        dayTimestamps.forEachIndexed { index, timestamp ->
+                            val file = fileByTimestamp[timestamp]
+                            val status = statuses[timestamp] ?: "pending"
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Sự kiện ${dayTimestamps.size - index} · ${timeFormatter.format(Date(timestamp))}",
+                                            style = MaterialTheme.typography.bodyMedium)
+                                        Text(when (status) {
+                                            "snore" -> "Đã xác nhận: Ngáy"
+                                            "not_snore" -> "Đã xác nhận: Không phải ngáy"
+                                            else -> "Đang nghi ngờ · Chưa xác nhận"
+                                        }, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (file != null) {
+                                        Button(onClick = {
+                                            try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
+                                            activePlayer = MediaPlayer.create(context, Uri.fromFile(file))
+                                            if (activePlayer != null) {
+                                                playingName = timestamp
+                                                activePlayer?.setOnCompletionListener {
+                                                    try { it.release() } catch (_: Exception) { }
+                                                    activePlayer = null
+                                                    playingName = null
+                                                }
+                                                activePlayer?.start()
                                             }
-                                            activePlayer?.start()
-                                        }
-                                    }) { Text(if (playingName == file.name) "Phát lại" else "Nghe") }
-                                    if (playingName == file.name) OutlinedButton(onClick = {
-                                        try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
-                                        activePlayer = null
-                                        playingName = null
-                                    }) { Text("Dừng") }
+                                        }) { Text(if (playingName == timestamp) "Đang phát" else "Nghe lại") }
+                                    } else {
+                                        Text("Đã xóa clip", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(onClick = { setStatus(timestamp, "snore") }, modifier = Modifier.weight(1f)) {
+                                        Text(if (status == "snore") "✓ Ngáy" else "Ngáy")
+                                    }
+                                    OutlinedButton(onClick = { setStatus(timestamp, "not_snore") }, modifier = Modifier.weight(1f)) {
+                                        Text(if (status == "not_snore") "✓ Không ngáy" else "Không ngáy")
+                                    }
+                                    OutlinedButton(onClick = { setStatus(timestamp, "pending") }, modifier = Modifier.weight(0.8f)) {
+                                        Text("Để sau")
+                                    }
                                 }
                             }
+                            if (index < dayTimestamps.lastIndex) androidx.compose.material3.HorizontalDivider()
                         }
                     }
                 }
             }
         }
-        Text("Mỗi bản ghi là âm thanh được bộ phát hiện kích hoạt, chưa phải kết luận đã ngáy. Cần nghe/AI phân loại clip trước khi thống kê tiếng ngáy.",
+        Text("Bộ phát hiện chỉ ghi nhận âm thanh vượt ngưỡng, không tự kết luận tiếng ngáy. Bạn nghe lại và đánh dấu để tạo bộ thống kê đã xác nhận.",
             style = MaterialTheme.typography.bodySmall)
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Xóa toàn bộ clip âm thanh?") },
+            text = { Text("Sẽ xóa ${allFiles.size} tệp WAV để giải phóng dung lượng. Mốc thời gian và kết quả Ngáy/Không ngáy vẫn được giữ trong báo cáo. Nên xuất CSV trước khi xóa nếu bạn muốn lưu bản thống kê bên ngoài.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
+                    activePlayer = null
+                    playingName = null
+                    allFiles.forEach { it.delete() }
+                    showDeleteConfirm = false
+                    refresh = !refresh
+                }) { Text("Xóa clip") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Hủy") }
+            }
+        )
     }
 }
 
