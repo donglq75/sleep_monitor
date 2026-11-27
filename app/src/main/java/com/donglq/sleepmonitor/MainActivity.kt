@@ -184,6 +184,9 @@ private fun SoundsScreen(onBack: () -> Unit) {
         }
         Text("Thời lượng phát: ${minutes.toInt()} phút")
         Slider(value = minutes, onValueChange = {
+            minutes = it
+            preferences.edit().putInt("last_duration_minutes", it.toInt()).apply()
+        }, valueRange = 5f..180f)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = {
