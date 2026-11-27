@@ -23,4 +23,11 @@ Android app for personal sleep-audio experiments.
 Start with a working Android shell and reliable foreground audio session. Add event capture and review UI, then iterate on on-device event classification and OneDrive backup.
 
 ## Build
-Open the project in Android Studio and allow Gradle sync. The Android project scaffold will be added in subsequent commits.
+Open the project in Android Studio and allow Gradle sync.
+
+GitHub Actions builds the debug APK. To keep the APK signing identity stable across updates, configure these repository Actions secrets:
+- `SLEEP_MONITOR_KEYSTORE_BASE64`
+- `SLEEP_MONITOR_KEYSTORE_PASSWORD`
+- `SLEEP_MONITOR_KEY_PASSWORD`
+
+The key alias is `sleepmonitor`. Never commit the keystore or its passwords to the repository.
