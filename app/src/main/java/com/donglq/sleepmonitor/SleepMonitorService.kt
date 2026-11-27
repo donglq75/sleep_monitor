@@ -186,7 +186,8 @@ class SleepMonitorService : Service() {
     private fun saveWav(pcm: ByteArray, timestamp: Long) {
         if (pcm.isEmpty()) return
         try {
-            val folder = File(filesDir, "events").apply { mkdirs() }
+            val dayFolder = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+            val folder = File(File(filesDir, "events"), dayFolder).apply { mkdirs() }
             val file = File(folder, "event_${timestamp}.wav")
             FileOutputStream(file).use { out ->
                 val dataLength = pcm.size
