@@ -105,7 +105,7 @@ private fun HomeScreen(onSounds: () -> Unit, onMonitor: () -> Unit, onReport: ()
         HomeCard("2. Giám sát ban đêm", "Ghi các đoạn âm thanh nghi ngáy, không lưu cả đêm.", "Giám sát", onMonitor)
         HomeCard("3. Báo cáo giấc ngủ", "Xem mốc sự kiện và nghe lại từng đoạn.", "Báo cáo", onReport)
         Spacer(Modifier.weight(1f))
-        Text("Bản thử nghiệm 1.1.0 · Dữ liệu lưu trên thiết bị", style = MaterialTheme.typography.labelSmall)
+        Text("Bản thử nghiệm 1.1.2 · Dữ liệu lưu trên thiết bị", style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -373,7 +373,7 @@ private fun MonitorScreen(onBack: () -> Unit) {
         }
         Text("Cách hoạt động", style = MaterialTheme.typography.titleMedium)
         Text("Bạn có thể bật thủ công tại đây, hoặc chọn tự bật sau 5 phút phát nhạc. Dịch vụ vẫn chạy khi đổi trang hoặc tắt màn hình. Ứng dụng phân tích microphone ở 16 kHz; khi âm thanh lớn liên tiếp vượt ngưỡng, ứng dụng lưu clip gồm khoảng 10 giây trước và 12 giây sau sự kiện.")
-        Text("Khử vọng âm (AEC) và giảm nhiễu (nếu máy hỗ trợ) được bật để hạn chế âm thanh từ nhạc đang phát lọt vào nhận diện.")
+        Text("Đang dùng nguồn microphone tiêu chuẩn để không làm suy giảm tiếng nói và tiếng động nhỏ. Nhạc phát từ loa có thể lọt vào ghi nhận; hãy để điện thoại cách loa một khoảng phù hợp.")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Lưu ý về độ chính xác", style = MaterialTheme.typography.titleMedium)
