@@ -3,6 +3,7 @@ package com.donglq.sleepmonitor
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.os.Bundle
 import android.os.CountDownTimer
 import androidx.activity.ComponentActivity
@@ -114,9 +115,18 @@ private fun PageHeader(title: String, onBack: () -> Unit) {
 @Composable
 private fun SoundsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    var selectedUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedName by remember { mutableStateOf("Chưa chọn tệp") }
-    var minutes by remember { mutableFloatStateOf(30f) }
+    val preferences = remember {
+        context.getSharedPreferences("sleep_monitor_preferences", android.content.Context.MODE_PRIVATE)
+    }
+    var selectedUri by remember {
+        mutableStateOf(preferences.getString("last_audio_uri", null)?.let(Uri::parse))
+    }
+    var selectedName by remember {
+        mutableStateOf(preferences.getString("last_audio_name", "Chưa chọn tệp") ?: "Chưa chọn tệp")
+    }
+    var minutes by remember {
+        mutableFloatStateOf(preferences.getInt("last_duration_minutes", 30).toFloat().coerceIn(5f, 180f))
+    }
     var playing by remember { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("Chọn một tệp âm thanh có sẵn trên điện thoại để thử phát.") }
@@ -146,7 +156,12 @@ private fun SoundsScreen(onBack: () -> Unit) {
             } catch (_: SecurityException) { }
             stopPlayback()
             selectedUri = uri
-            selectedName = uri.lastPathSegment?.substringAfterLast('/') ?: "Tệp âm thanh đã chọn"
+            val displayName = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+                ?: "Tệp âm thanh đã chọn"
+            selectedName = displayName
+            preferences.edit().putString("last_audio_uri", uri.toString())
+                .putString("last_audio_name", displayName).apply()
             message = "Đã chọn tệp. Nhấn Phát để bắt đầu."
         }
     }
@@ -168,7 +183,7 @@ private fun SoundsScreen(onBack: () -> Unit) {
             }
         }
         Text("Thời lượng phát: ${minutes.toInt()} phút")
-        Slider(value = minutes, onValueChange = { minutes = it }, valueRange = 5f..180f)
+        Slider(value = minutes, onValueChange = {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = {
