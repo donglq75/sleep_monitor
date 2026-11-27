@@ -9,8 +9,6 @@ import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -24,8 +22,6 @@ import kotlin.math.sqrt
 class SleepMonitorService : Service() {
     @Volatile private var running = false
     private var recorder: AudioRecord? = null
-    private var echoCanceler: AcousticEchoCanceler? = null
-    private var noiseSuppressor: NoiseSuppressor? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var worker: Thread? = null
 
@@ -51,7 +47,7 @@ class SleepMonitorService : Service() {
             Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("Sleep Monitor đang giám sát")
-                .setContentText(if (delayMs > 0) "Sẽ bắt đầu phân tích sau 5 phút · Chỉ lưu đoạn sự kiện" else "Đang phân tích âm thanh trên thiết bị · Chỉ lưu đoạn sự kiện")
+                .setContentText(if (delayMs > 0) "Sẽ bắt đầu phân tích sau 5 phút · Chỉ lưu đoạn sự kiện" else "Đang phân tích âm thanh từ microphone · Chỉ lưu đoạn sự kiện")
                 .setContentIntent(openApp)
                 .setOngoing(true)
                 .build()
@@ -106,7 +102,7 @@ class SleepMonitorService : Service() {
         }
         val bufferBytes = maxOf(minBuffer * 2, 8192)
         val audio = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            MediaRecorder.AudioSource.MIC,
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -120,12 +116,6 @@ class SleepMonitorService : Service() {
             return
         }
         try {
-            if (AcousticEchoCanceler.isAvailable()) {
-                echoCanceler = AcousticEchoCanceler.create(audio.audioSessionId)?.apply { enabled = true }
-            }
-            if (NoiseSuppressor.isAvailable()) {
-                noiseSuppressor = NoiseSuppressor.create(audio.audioSessionId)?.apply { enabled = true }
-            }
             audio.startRecording()
         } catch (_: Exception) {
             stopCapture()
@@ -225,10 +215,6 @@ class SleepMonitorService : Service() {
         try { recorder?.stop() } catch (_: Exception) { }
         worker?.interrupt()
         worker = null
-        try { echoCanceler?.release() } catch (_: Exception) { }
-        try { noiseSuppressor?.release() } catch (_: Exception) { }
-        echoCanceler = null
-        noiseSuppressor = null
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) { }
         wakeLock = null
         getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
