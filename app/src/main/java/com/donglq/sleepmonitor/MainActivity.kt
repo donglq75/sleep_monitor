@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
@@ -16,7 +18,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,11 +55,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.produceState
 import androidx.core.content.ContextCompat
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -75,28 +85,67 @@ class MainActivity : ComponentActivity() {
 private fun SleepMonitorApp() {
     val context = LocalContext.current
     var screen by remember { mutableStateOf(Screen.HOME) }
+    val prefs = remember { context.getSharedPreferences(SleepMonitorService.PREFS, Context.MODE_PRIVATE) }
+    var backgroundUri by remember { mutableStateOf(prefs.getString("app_background_uri", null)?.let(Uri::parse)) }
+    val backgroundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            catch (_: SecurityException) { }
+            backgroundUri = uri
+            prefs.edit().putString("app_background_uri", uri.toString()).apply()
+        }
+    }
+    val backgroundBitmap by produceState<Bitmap?>(initialValue = null, key1 = backgroundUri) {
+        value = withContext(Dispatchers.IO) {
+            try { backgroundUri?.let { context.contentResolver.openInputStream(it)?.use(BitmapFactory::decodeStream) } }
+            catch (_: Exception) { null }
+        }
+    }
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(
             modifier = Modifier.fillMaxSize().statusBarsPadding(),
             color = MaterialTheme.colorScheme.background
         ) {
-            when (screen) {
-                Screen.HOME -> HomeScreen { screen = Screen.PLAYER }
-                Screen.PLAYER -> PlayerMonitorScreen(onReport = {
-                    val prefs = context.getSharedPreferences(SleepMonitorService.PREFS, Context.MODE_PRIVATE)
-                    if (prefs.getBoolean("auto_stop_on_report", true)) {
-                        context.stopService(Intent(context, SleepMonitorService::class.java))
-                    }
-                    screen = Screen.REPORT
-                })
-                Screen.REPORT -> ReportScreen(onBack = { screen = Screen.PLAYER })
+            Box(Modifier.fillMaxSize()) {
+                if (backgroundBitmap != null) {
+                    Image(
+                        bitmap = backgroundBitmap!!.asImageBitmap(),
+                        contentDescription = "Ảnh nền Sleep Monitor",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.58f)))
+                }
+                when (screen) {
+                    Screen.HOME -> HomeScreen(
+                        onEnter = { screen = Screen.PLAYER },
+                        onPickBackground = { backgroundPicker.launch(arrayOf("image/*")) },
+                        onClearBackground = {
+                            backgroundUri = null
+                            prefs.edit().remove("app_background_uri").apply()
+                        },
+                        hasBackground = backgroundUri != null
+                    )
+                    Screen.PLAYER -> PlayerMonitorScreen(onReport = {
+                        if (prefs.getBoolean("auto_stop_on_report", true)) {
+                            context.stopService(Intent(context, SleepMonitorService::class.java))
+                        }
+                        screen = Screen.REPORT
+                    })
+                    Screen.REPORT -> ReportScreen(onBack = { screen = Screen.PLAYER })
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HomeScreen(onEnter: () -> Unit) {
+private fun HomeScreen(
+    onEnter: () -> Unit,
+    onPickBackground: () -> Unit,
+    onClearBackground: () -> Unit,
+    hasBackground: Boolean
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(22.dp),
         verticalArrangement = Arrangement.Center,
@@ -109,8 +158,20 @@ private fun HomeScreen(onEnter: () -> Unit) {
             Text("Vào trình phát & giám sát")
         }
         Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onPickBackground) { Text(if (hasBackground) "Đổi ảnh nền" else "Chọn ảnh nền") }
+            if (hasBackground) TextButton(onClick = onClearBackground) { Text("Bỏ ảnh nền") }
+        }
+        Spacer(Modifier.height(12.dp))
         Text("Phát nhạc thư giãn và ghi nhận những âm thanh đáng chú ý trong đêm.",
             style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(28.dp))
+        val versionName = remember {
+            try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?" }
+            catch (_: Exception) { "?" }
+        }
+        Text("Sleep Monitor · v$versionName", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
     }
 }
 
