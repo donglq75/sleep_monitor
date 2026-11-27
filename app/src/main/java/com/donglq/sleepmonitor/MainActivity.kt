@@ -1,8 +1,14 @@
 package com.donglq.sleepmonitor
 
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Bundle
+import android.os.CountDownTimer
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,12 +27,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 private enum class Screen { HOME, SOUNDS, MONITOR, REPORT }
@@ -69,7 +77,7 @@ private fun HomeScreen(onSounds: () -> Unit, onMonitor: () -> Unit, onReport: ()
         Text("Sleep Monitor", style = MaterialTheme.typography.headlineLarge)
         Text("Ngủ ngon hơn · Hiểu giấc ngủ của bạn", style = MaterialTheme.typography.bodyLarge)
         HomeCard("1. Âm thanh dễ ngủ",
-            "Chọn âm thanh, đặt thời gian phát và tự động chuyển sang giám sát.",
+            "Chọn tệp âm thanh trên điện thoại, đặt thời lượng và phát lặp khi ngủ.",
             "Thiết lập âm thanh", onSounds)
         HomeCard("2. Giám sát ban đêm",
             "Phát hiện thử nghiệm tiếng ngáy và tiếng nói. Chỉ lưu đoạn có sự kiện.",
@@ -78,7 +86,7 @@ private fun HomeScreen(onSounds: () -> Unit, onMonitor: () -> Unit, onReport: ()
             "Xem dòng thời gian sự kiện và nghe lại các đoạn ghi âm.",
             "Xem báo cáo", onReport)
         Spacer(Modifier.weight(1f))
-        Text("Thử nghiệm 1.0.1 · Dữ liệu lưu trên thiết bị", style = MaterialTheme.typography.labelSmall)
+        Text("Thử nghiệm 1.0.2 · Dữ liệu lưu trên thiết bị", style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -105,20 +113,122 @@ private fun PageHeader(title: String, onBack: () -> Unit) {
 
 @Composable
 private fun SoundsScreen(onBack: () -> Unit) {
-    var selected by remember { mutableStateOf("Tiếng mưa") }
+    val context = LocalContext.current
+    var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedName by remember { mutableStateOf("Chưa chọn tệp") }
     var minutes by remember { mutableFloatStateOf(30f) }
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    var playing by remember { mutableStateOf(false) }
+    var preparing by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("Chọn một tệp âm thanh có sẵn trên điện thoại để thử phát.") }
+    val playerState = remember { mutableStateOf<MediaPlayer?>(null) }
+    val timerState = remember { mutableStateOf<CountDownTimer?>(null) }
+
+    fun stopPlayback() {
+        timerState.value?.cancel()
+        timerState.value = null
+        playerState.value?.let { player ->
+            try { if (player.isPlaying) player.stop() } catch (_: IllegalStateException) { }
+            player.release()
+        }
+        playerState.value = null
+        playing = false
+        preparing = false
+    }
+
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) { }
+            stopPlayback()
+            selectedUri = uri
+            selectedName = uri.lastPathSegment?.substringAfterLast('/') ?: "Tệp âm thanh đã chọn"
+            message = "Đã chọn tệp. Nhấn Phát để bắt đầu."
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { stopPlayback() }
+    }
+
+    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         PageHeader("Âm thanh dễ ngủ", onBack)
-        Text("Chọn âm thanh")
-        listOf("Tiếng mưa", "Tiếng suối", "Tiếng quạt", "Tiếng sóng biển", "Nhạc thư giãn").forEach { item ->
-            OutlinedButton(onClick = { selected = item }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (selected == item) "✓  $item" else item)
+        Text("Tệp âm thanh")
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(selectedName, style = MaterialTheme.typography.titleMedium)
+                OutlinedButton(
+                    onClick = { filePicker.launch(arrayOf("audio/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Chọn tệp từ điện thoại") }
             }
         }
-        Text("Thời lượng: ${minutes.toInt()} phút")
+        Text("Thời lượng phát: ${minutes.toInt()} phút")
         Slider(value = minutes, onValueChange = { minutes = it }, valueRange = 5f..180f)
-        Text("Đã chọn: $selected")
-        Text("Bước giao diện: danh sách và hẹn giờ đã có. Bộ phát âm thanh sẽ được nối ở bản kế tiếp; hiện chưa phát tiếng.")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = {
+                    val uri = selectedUri
+                    if (uri == null) {
+                        message = "Bạn cần chọn tệp âm thanh trước."
+                    } else {
+                        stopPlayback()
+                        preparing = true
+                        message = "Đang chuẩn bị âm thanh…"
+                        try {
+                            val player = MediaPlayer()
+                            playerState.value = player
+                            player.setAudioAttributes(
+                                AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                    .build()
+                            )
+                            player.setDataSource(context, uri)
+                            player.isLooping = true
+                            player.setOnPreparedListener {
+                                it.start()
+                                preparing = false
+                                playing = true
+                                message = "Đang phát · Tự dừng sau ${minutes.toInt()} phút."
+                                timerState.value = object : CountDownTimer(minutes.toLong() * 60_000L, 1_000L) {
+                                    override fun onTick(millisUntilFinished: Long) {
+                                        message = "Đang phát · Còn ${(millisUntilFinished / 60_000L)} phút."
+                                    }
+                                    override fun onFinish() {
+                                        stopPlayback()
+                                        message = "Đã hết thời gian. Âm thanh đã tự dừng."
+                                    }
+                                }.start()
+                            }
+                            player.setOnErrorListener { _, _, _ ->
+                                stopPlayback()
+                                message = "Không phát được tệp này. Hãy thử một tệp MP3, M4A hoặc WAV khác."
+                                true
+                            }
+                            player.prepareAsync()
+                        } catch (error: Exception) {
+                            stopPlayback()
+                            message = "Không mở được tệp âm thanh: ${error.localizedMessage ?: "lỗi không xác định"}"
+                        }
+                    }
+                },
+                enabled = !playing && !preparing
+            ) { Text(if (preparing) "Đang tải…" else "Phát") }
+            OutlinedButton(onClick = {
+                stopPlayback()
+                message = "Đã dừng phát."
+            }, enabled = playing || preparing) { Text("Dừng") }
+        }
+        Text(message, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            "Bản thử nghiệm hiện phát tệp âm thanh cục bộ và tự dừng theo hẹn giờ. Chưa có thư viện âm thanh dựng sẵn; chưa tự chuyển sang giám sát.",
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -127,7 +237,7 @@ private fun MonitorScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         PageHeader("Giám sát ban đêm", onBack)
         Text("Trạng thái: Chưa bắt đầu", style = MaterialTheme.typography.titleMedium)
-        Text("Ứng dụng sẽ cần quyền microphone và dịch vụ chạy nền để tiếp tục giám sát khi màn hình tắt.")
+        Text("Phần ghi âm nền và phát hiện sự kiện đang được phát triển; bản này chưa bật microphone.")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Nguyên tắc riêng tư", style = MaterialTheme.typography.titleMedium)
@@ -135,7 +245,6 @@ private fun MonitorScreen(onBack: () -> Unit) {
                 Text("Âm thanh được xử lý trên điện thoại; không tự động tải lên đám mây.")
             }
         }
-        Text("Bước giao diện: màn hình trạng thái đã có. Chưa bật ghi âm cho đến khi dịch vụ giám sát và cơ chế lưu clip được hoàn thiện.")
     }
 }
 
