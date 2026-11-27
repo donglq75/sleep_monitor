@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun SleepMonitorApp() {
+    val appContext = LocalContext.current
     var screen by remember { mutableStateOf(Screen.HOME) }
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(
@@ -74,7 +76,13 @@ private fun SleepMonitorApp() {
                 Screen.HOME -> HomeScreen(
                     onSounds = { screen = Screen.SOUNDS },
                     onMonitor = { screen = Screen.MONITOR },
-                    onReport = { screen = Screen.REPORT }
+                    onReport = {
+                        val prefs = appContext.getSharedPreferences(SleepMonitorService.PREFS, Context.MODE_PRIVATE)
+                        if (prefs.getBoolean("auto_stop_on_report", true)) {
+                            appContext.stopService(Intent(appContext, SleepMonitorService::class.java))
+                        }
+                        screen = Screen.REPORT
+                    }
                 )
                 Screen.SOUNDS -> SoundsScreen(onBack = { screen = Screen.HOME })
                 Screen.MONITOR -> MonitorScreen(onBack = { screen = Screen.HOME })
@@ -232,6 +240,18 @@ private fun SoundsScreen(onBack: () -> Unit) {
                                 preparing = false
                                 playing = true
                                 message = "Đang phát · Tự dừng sau ${minutes.toInt()} phút."
+                                if (preferences.getBoolean("auto_start_after_music_5m", false) &&
+                                    !preferences.getBoolean("monitor_running", false)
+                                ) {
+                                    val delayedIntent = Intent(context, SleepMonitorService::class.java)
+                                        .putExtra(SleepMonitorService.EXTRA_DELAY_MS, 5 * 60 * 1000L)
+                                    try {
+                                        ContextCompat.startForegroundService(context, delayedIntent)
+                                        message = "Đang phát · Giám sát sẽ tự bật sau 5 phút."
+                                    } catch (error: Exception) {
+                                        message = "Không thể đặt lịch giám sát: ${error.localizedMessage ?: "lỗi quyền"}"
+                                    }
+                                }
                                 timerState.value = object : CountDownTimer(minutes.toLong() * 60_000L, 1_000L) {
                                     override fun onTick(millisUntilFinished: Long) {
                                         message = "Đang phát · Còn ${millisUntilFinished / 60_000L} phút."
@@ -324,8 +344,35 @@ private fun MonitorScreen(onBack: () -> Unit) {
                 }
             }
         }
+        var autoStartAfterMusic by remember { mutableStateOf(prefs.getBoolean("auto_start_after_music_5m", false)) }
+        var autoStopOnReport by remember { mutableStateOf(prefs.getBoolean("auto_stop_on_report", true)) }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Tự động hóa", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = autoStartAfterMusic, onCheckedChange = {
+                        autoStartAfterMusic = it
+                        prefs.edit().putBoolean("auto_start_after_music_5m", it).apply()
+                    })
+                    Column(Modifier.weight(1f)) {
+                        Text("Tự bật giám sát sau 5 phút phát nhạc")
+                        Text("Không tạo lịch mới nếu giám sát đã chạy.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = autoStopOnReport, onCheckedChange = {
+                        autoStopOnReport = it
+                        prefs.edit().putBoolean("auto_stop_on_report", it).apply()
+                    })
+                    Column(Modifier.weight(1f)) {
+                        Text("Tự dừng giám sát khi mở Báo cáo")
+                        Text("Mặc định bật.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
         Text("Cách hoạt động", style = MaterialTheme.typography.titleMedium)
-        Text("Bạn nên bật giám sát trước khi phát nhạc: sau khi bấm Bắt đầu giám sát, quay lại mục 1 để phát nhạc. Dịch vụ vẫn chạy khi đổi trang hoặc tắt màn hình. Ứng dụng phân tích microphone ở 16 kHz; khi âm thanh lớn liên tiếp vượt ngưỡng, ứng dụng lưu clip gồm khoảng 10 giây trước và 12 giây sau sự kiện.")
+        Text("Bạn có thể bật thủ công tại đây, hoặc chọn tự bật sau 5 phút phát nhạc. Dịch vụ vẫn chạy khi đổi trang hoặc tắt màn hình. Ứng dụng phân tích microphone ở 16 kHz; khi âm thanh lớn liên tiếp vượt ngưỡng, ứng dụng lưu clip gồm khoảng 10 giây trước và 12 giây sau sự kiện.")
         Text("Khử vọng âm (AEC) và giảm nhiễu (nếu máy hỗ trợ) được bật để hạn chế âm thanh từ nhạc đang phát lọt vào nhận diện.")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
