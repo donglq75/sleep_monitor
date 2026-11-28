@@ -50,8 +50,12 @@ class SleepMonitorService : Service() {
 
     private fun startCapture(delayMs: Long = 0L) {
         createChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(false),
-            if (Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+        val notification = buildNotification(false)
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit().putBoolean("monitor_running", true)
