@@ -669,6 +669,9 @@ private fun ReportScreen(onBack: () -> Unit) {
                         dayTimestamps.forEachIndexed { index, timestamp ->
                             val file = fileByTimestamp[timestamp]
                             val status = statuses[timestamp] ?: "pending"
+                            val suggestedStatus = aiSuggestions[timestamp]?.let { aiSuggestionStatus(it) }
+                            val isAiConfirmed = suggestedStatus != null &&
+                                aiConfirmedStatuses[timestamp] == suggestedStatus && status == suggestedStatus
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Sự kiện ${dayTimestamps.size - index} · ${timeFormatter.format(Date(timestamp))}",
                                     style = MaterialTheme.typography.titleSmall)
@@ -697,26 +700,44 @@ private fun ReportScreen(onBack: () -> Unit) {
                                             modifier = Modifier.weight(1f)
                                         ) { Text(if (playingName == timestamp) "Đang phát" else "Nghe lại") }
                                         OutlinedButton(
-                                            enabled = aiRunning == null,
+                                            enabled = aiRunning == null && !isAiConfirmed,
                                             onClick = {
-                                                aiRunning = timestamp
-                                                coroutineScope.launch {
-                                                    try {
-                                                        val result = withContext(Dispatchers.IO) {
-                                                            YamnetAnalyzer.analyze(context, file)
+                                                if (suggestedStatus != null) {
+                                                    statuses[timestamp] = suggestedStatus
+                                                    aiConfirmedStatuses[timestamp] = suggestedStatus
+                                                    prefs.edit()
+                                                        .putString("event_status_$timestamp", suggestedStatus)
+                                                        .putString("event_ai_confirmed_$timestamp", suggestedStatus)
+                                                        .apply()
+                                                } else {
+                                                    aiRunning = timestamp
+                                                    coroutineScope.launch {
+                                                        try {
+                                                            val result = withContext(Dispatchers.IO) {
+                                                                YamnetAnalyzer.analyze(context, file)
+                                                            }
+                                                            val display = result.title + " · " + (result.confidence * 100).toInt() + "%"
+                                                            aiSuggestions[timestamp] = display
+                                                            prefs.edit().putString("event_ai_$timestamp", display).apply()
+                                                        } catch (error: Exception) {
+                                                            aiSuggestions[timestamp] = "Không phân tích được: " + (error.message ?: "lỗi mô hình")
+                                                        } finally {
+                                                            aiRunning = null
                                                         }
-                                                        val display = result.title + " · " + (result.confidence * 100).toInt() + "%"
-                                                        aiSuggestions[timestamp] = display
-                                                        prefs.edit().putString("event_ai_$timestamp", display).apply()
-                                                    } catch (error: Exception) {
-                                                        aiSuggestions[timestamp] = "Không phân tích được: " + (error.message ?: "lỗi mô hình")
-                                                    } finally {
-                                                        aiRunning = null
                                                     }
                                                 }
                                             },
                                             modifier = Modifier.weight(1f)
-                                        ) { Text(if (aiRunning == timestamp) "Đang phân tích…" else "AI phân tích") }
+                                        ) {
+                                            Text(
+                                                when {
+                                                    aiRunning == timestamp -> "Đang phân tích…"
+                                                    isAiConfirmed -> "Đã xác nhận AI"
+                                                    suggestedStatus != null -> "Xác nhận AI"
+                                                    else -> "AI phân tích"
+                                                }
+                                            )
+                                        }
                                     }
                                 } else {
                                     Text("Đã xóa clip", style = MaterialTheme.typography.labelSmall)
@@ -725,29 +746,6 @@ private fun ReportScreen(onBack: () -> Unit) {
                                     Text("AI gợi ý (chưa xác nhận): " + suggestion,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.secondary)
-                                }
-                                val suggestedStatus = aiSuggestions[timestamp]?.let { aiSuggestionStatus(it) }
-                                if (suggestedStatus != null) {
-                                    val isAiConfirmed = aiConfirmedStatuses[timestamp] == suggestedStatus &&
-                                        statuses[timestamp] == suggestedStatus
-                                    OutlinedButton(
-                                        onClick = {
-                                            statuses[timestamp] = suggestedStatus
-                                            aiConfirmedStatuses[timestamp] = suggestedStatus
-                                            prefs.edit()
-                                                .putString("event_status_$timestamp", suggestedStatus)
-                                                .putString("event_ai_confirmed_$timestamp", suggestedStatus)
-                                                .apply()
-                                        },
-                                        enabled = !isAiConfirmed,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(if (isAiConfirmed) "Đã xác nhận AI" else "Xác nhận AI · " + when (suggestedStatus) {
-                                            "snore" -> "Ngáy"
-                                            "cough" -> "Ho"
-                                            else -> "Nói mơ"
-                                        })
-                                    }
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -786,7 +784,7 @@ private fun ReportScreen(onBack: () -> Unit) {
                 }
             }
         }
-        Text("AI dùng YAMNet để gợi ý loại âm thanh ngay trên điện thoại. AI không tự thay đổi phân loại; hãy nghe lại clip và xác nhận. Phần trăm là độ tin cậy của mô hình, không phải kết luận chắc chắn. Có thể nhập tên âm thanh khác để bổ sung dữ liệu.",
+        Text("AI dùng YAMNet để gợi ý loại âm thanh ngay trên điện thoại. Với gợi ý Ngáy hoặc Ho, nút AI sẽ chuyển thành Xác nhận AI; bấm để lưu và tick checkbox. Tiếng nói chỉ là gợi ý, không tự kết luận là nói mơ. Bạn vẫn có thể tự chọn checkbox nếu AI nhận định sai. Phần trăm là độ tin cậy của mô hình, không phải kết luận chắc chắn.",
             style = MaterialTheme.typography.bodySmall)
     }
 
