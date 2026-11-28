@@ -461,7 +461,8 @@ private fun ReportScreen(onBack: () -> Unit) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("Tổng quan sự kiện", style = MaterialTheme.typography.titleMedium)
                 Text("Tổng cộng ${timestamps.size} sự kiện · Còn ${allFiles.size} clip âm thanh.")
-                Text("Đã xác nhận ngáy: ${statuses.values.count { it == "snore" }} · Không phải ngáy: ${statuses.values.count { it == "not_snore" }} · Chưa xác nhận: ${timestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
+                Text("Ngáy: ${statuses.values.count { it == "snore" }} · Nói mơ: ${statuses.values.count { it == "talking" }} · Ho: ${statuses.values.count { it == "cough" }}")
+                Text("Không ngáy: ${statuses.values.count { it == "not_snore" }} · Chưa xác định: ${timestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
                 Text("Các kết luận được lưu riêng, không mất khi xóa clip.", style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -471,9 +472,10 @@ private fun ReportScreen(onBack: () -> Unit) {
                 Text("Sơ đồ thời gian sự kiện", style = MaterialTheme.typography.titleMedium)
                 Text("Mỗi chấm là một sự kiện trong ngày; vị trí theo giờ ghi nhận.", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("🟠 Chưa xác nhận", style = MaterialTheme.typography.labelSmall)
+                    Text("🟠 Chưa xác định", style = MaterialTheme.typography.labelSmall)
                     Text("🟢 Ngáy", style = MaterialTheme.typography.labelSmall)
-                    Text("⚪ Không ngáy", style = MaterialTheme.typography.labelSmall)
+                    Text("🔵 Nói mơ", style = MaterialTheme.typography.labelSmall)
+                    Text("🟣 Ho", style = MaterialTheme.typography.labelSmall)
                 }
                 if (grouped.isEmpty()) Text("Chưa có dữ liệu sự kiện.")
                 grouped.forEach { (dayKey, dayTimestamps) ->
@@ -488,6 +490,8 @@ private fun ReportScreen(onBack: () -> Unit) {
                             val color = when (statuses[timestamp]) {
                                 "snore" -> Color(0xFF35C979)
                                 "not_snore" -> Color(0xFFB0B0B0)
+                                "talking" -> Color(0xFF42A5F5)
+                                "cough" -> Color(0xFFAB47BC)
                                 else -> Color(0xFFFFA726)
                             }
                             drawCircle(color, radius = 5.dp.toPx(), center = Offset(x.coerceIn(5.dp.toPx(), size.width - 5.dp.toPx()), y))
@@ -510,7 +514,13 @@ private fun ReportScreen(onBack: () -> Unit) {
                     val header = "Thoi_gian,Ngay,Gio,Trang_thai,Ten_trang_thai,Con_clip\n"
                     val rows = timestamps.sorted().joinToString("") { timestamp ->
                         val status = statuses[timestamp] ?: "pending"
-                        val label = when (status) { "snore" -> "Ngáy"; "not_snore" -> "Không phải ngáy"; else -> "Chưa xác nhận" }
+                        val label = when (status) {
+                            "snore" -> "Ngáy"
+                            "not_snore" -> "Không ngáy"
+                            "talking" -> "Nói mơ"
+                            "cough" -> "Ho"
+                            else -> "Chưa xác định"
+                        }
                         "${timestamp},${dayKeyFormatter.format(Date(timestamp))},${timeFormatter.format(Date(timestamp))},${status},${label},${if (fileByTimestamp.containsKey(timestamp)) "Có" else "Không"}\n"
                     }
                     csvToExport = "\uFEFF" + header + rows
@@ -545,8 +555,10 @@ private fun ReportScreen(onBack: () -> Unit) {
                                             style = MaterialTheme.typography.bodyMedium)
                                         Text(when (status) {
                                             "snore" -> "Đã xác nhận: Ngáy"
-                                            "not_snore" -> "Đã xác nhận: Không phải ngáy"
-                                            else -> "Đang nghi ngờ · Chưa xác nhận"
+                                            "not_snore" -> "Đã xác nhận: Không ngáy"
+                                            "talking" -> "Đã xác nhận: Nói mơ"
+                                            "cough" -> "Đã xác nhận: Ho"
+                                            else -> "Đang nghi ngờ · Chưa xác định"
                                         }, style = MaterialTheme.typography.bodySmall)
                                     }
                                     if (file != null) {
@@ -567,15 +579,30 @@ private fun ReportScreen(onBack: () -> Unit) {
                                         Text("Đã xóa clip", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    OutlinedButton(onClick = { setStatus(timestamp, "snore") }, modifier = Modifier.weight(1f)) {
-                                        Text(if (status == "snore") "✓ Ngáy" else "Ngáy")
+                                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = status == "snore", onCheckedChange = { if (it) setStatus(timestamp, "snore") else if (status == "snore") setStatus(timestamp, "pending") })
+                                            Text("Ngáy", style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = status == "not_snore", onCheckedChange = { if (it) setStatus(timestamp, "not_snore") else if (status == "not_snore") setStatus(timestamp, "pending") })
+                                            Text("Không ngáy", style = MaterialTheme.typography.bodyMedium)
+                                        }
                                     }
-                                    OutlinedButton(onClick = { setStatus(timestamp, "not_snore") }, modifier = Modifier.weight(1f)) {
-                                        Text(if (status == "not_snore") "✓ Không ngáy" else "Không ngáy")
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = status == "talking", onCheckedChange = { if (it) setStatus(timestamp, "talking") else if (status == "talking") setStatus(timestamp, "pending") })
+                                            Text("Nói mơ", style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = status == "cough", onCheckedChange = { if (it) setStatus(timestamp, "cough") else if (status == "cough") setStatus(timestamp, "pending") })
+                                            Text("Ho", style = MaterialTheme.typography.bodyMedium)
+                                        }
                                     }
-                                    OutlinedButton(onClick = { setStatus(timestamp, "pending") }, modifier = Modifier.weight(0.8f)) {
-                                        Text("Để sau")
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = status == "pending", onCheckedChange = { if (it) setStatus(timestamp, "pending") })
+                                        Text("Chưa xác định", style = MaterialTheme.typography.bodyMedium)
                                     }
                                 }
                             }
@@ -585,7 +612,7 @@ private fun ReportScreen(onBack: () -> Unit) {
                 }
             }
         }
-        Text("Bộ phát hiện chỉ ghi nhận âm thanh vượt ngưỡng, không tự kết luận tiếng ngáy. Bạn nghe lại và đánh dấu để tạo bộ thống kê đã xác nhận.",
+        Text("Bộ phát hiện hiện chỉ ghi nhận âm thanh vượt ngưỡng, chưa tự phân biệt ngáy, nói mơ hay ho. Bạn nghe lại và chọn một loại; các lựa chọn được lưu riêng cho từng sự kiện.",
             style = MaterialTheme.typography.bodySmall)
     }
 
