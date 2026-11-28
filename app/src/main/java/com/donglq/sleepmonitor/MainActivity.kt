@@ -417,10 +417,13 @@ private fun ReportScreen(onBack: () -> Unit) {
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
     val dayKeyFormatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val grouped = remember(timestamps) {
-        timestamps.groupBy { timestamp ->
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
-        }.toSortedMap(compareByDescending { it })
+        timestamps.mapNotNull { timestamp ->
+            val anchor = sleepWindowAnchor(timestamp) ?: return@mapNotNull null
+            dayKeyFormatter.format(Date(anchor)) to timestamp
+        }.groupBy({ it.first }, { it.second })
+            .toSortedMap(compareByDescending { it })
     }
+    val nightTimestamps = remember(grouped) { grouped.values.flatten() }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
@@ -460,7 +463,7 @@ private fun ReportScreen(onBack: () -> Unit) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("Tổng quan sự kiện", style = MaterialTheme.typography.titleMedium)
-                Text("Tổng cộng ${timestamps.size} sự kiện · Còn ${allFiles.size} clip âm thanh.")
+                Text("Tổng cộng ${nightTimestamps.size} sự kiện trong khung 21:00–09:00 · Còn ${nightTimestamps.count { fileByTimestamp.containsKey(it) }} clip.")
                 Text("Ngáy: ${statuses.values.count { it == "snore" }} · Nói mơ: ${statuses.values.count { it == "talking" }} · Ho: ${statuses.values.count { it == "cough" }}")
                 Text("Không ngáy: ${statuses.values.count { it == "not_snore" }} · Chưa xác định: ${timestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
                 Text("Các kết luận được lưu riêng, không mất khi xóa clip.", style = MaterialTheme.typography.bodySmall)
@@ -470,7 +473,7 @@ private fun ReportScreen(onBack: () -> Unit) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Sơ đồ thời gian sự kiện", style = MaterialTheme.typography.titleMedium)
-                Text("Mỗi chấm là một sự kiện trong ngày; vị trí theo giờ ghi nhận.", style = MaterialTheme.typography.bodySmall)
+                Text("Khung giấc ngủ cố định: 21:00 hôm trước đến 09:00 hôm sau.", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("🟠 Chưa xác định", style = MaterialTheme.typography.labelSmall)
                     Text("🟢 Ngáy", style = MaterialTheme.typography.labelSmall)
@@ -479,14 +482,17 @@ private fun ReportScreen(onBack: () -> Unit) {
                 }
                 if (grouped.isEmpty()) Text("Chưa có dữ liệu sự kiện.")
                 grouped.forEach { (dayKey, dayTimestamps) ->
-                    Text(dayKey, style = MaterialTheme.typography.labelMedium)
+                    val nightDate = try { dayKeyFormatter.parse(dayKey) } catch (_: Exception) { null }
+                    Text(nightDate?.let { "Đêm " + dateFormatter.format(it) } ?: "Đêm $dayKey",
+                        style = MaterialTheme.typography.labelMedium)
                     Canvas(Modifier.fillMaxWidth().height(34.dp)) {
                         val y = size.height / 2f
                         drawLine(Color.Gray, Offset(0f, y), Offset(size.width, y), strokeWidth = 2.dp.toPx())
                         dayTimestamps.forEach { timestamp ->
                             val cal = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
                             val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
-                            val x = size.width * (minuteOfDay / 1440f)
+                            val minutesFromStart = if (minuteOfDay >= 21 * 60) minuteOfDay - 21 * 60 else minuteOfDay + 3 * 60
+                            val x = size.width * (minutesFromStart / 720f)
                             val color = when (statuses[timestamp]) {
                                 "snore" -> Color(0xFF35C979)
                                 "not_snore" -> Color(0xFFB0B0B0)
@@ -498,11 +504,9 @@ private fun ReportScreen(onBack: () -> Unit) {
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("00:00", style = MaterialTheme.typography.labelSmall)
-                        Text("06:00", style = MaterialTheme.typography.labelSmall)
-                        Text("12:00", style = MaterialTheme.typography.labelSmall)
-                        Text("18:00", style = MaterialTheme.typography.labelSmall)
-                        Text("24:00", style = MaterialTheme.typography.labelSmall)
+                        listOf("21:00", "00:00", "03:00", "06:00", "09:00").forEach {
+                            Text(it, style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -512,7 +516,7 @@ private fun ReportScreen(onBack: () -> Unit) {
             OutlinedButton(
                 onClick = {
                     val header = "Thoi_gian,Ngay,Gio,Trang_thai,Ten_trang_thai,Con_clip\n"
-                    val rows = timestamps.sorted().joinToString("") { timestamp ->
+                    val rows = nightTimestamps.sorted().joinToString("") { timestamp ->
                         val status = statuses[timestamp] ?: "pending"
                         val label = when (status) {
                             "snore" -> "Ngáy"
@@ -636,6 +640,18 @@ private fun ReportScreen(onBack: () -> Unit) {
             }
         )
     }
+}
+
+private fun sleepWindowAnchor(timestamp: Long): Long? {
+    val calendar = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+    val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour in 9..20) return null
+    if (hour < 9) calendar.add(java.util.Calendar.DAY_OF_MONTH, -1)
+    calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+    calendar.set(java.util.Calendar.MINUTE, 0)
+    calendar.set(java.util.Calendar.SECOND, 0)
+    calendar.set(java.util.Calendar.MILLISECOND, 0)
+    return calendar.timeInMillis
 }
 
 private fun formatDuration(milliseconds: Long): String {
