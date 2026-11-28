@@ -2,7 +2,9 @@ package com.donglq.sleepmonitor
 
 import android.content.Context
 import com.google.mediapipe.tasks.audio.audioclassifier.AudioClassifier
+import com.google.mediapipe.tasks.audio.core.RunningMode
 import com.google.mediapipe.tasks.components.containers.AudioData
+import com.google.mediapipe.tasks.core.BaseOptions
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -19,14 +21,22 @@ object YamnetAnalyzer {
     fun analyze(context: Context, wavFile: File): Suggestion {
         val samples = readPcmWav(wavFile)
         require(samples.isNotEmpty()) { "Clip không có dữ liệu âm thanh" }
+        val baseOptions = BaseOptions.builder()
+            .setModelAssetPath("yamnet.tflite")
+            .build()
         val options = AudioClassifier.AudioClassifierOptions.builder()
-            .setScoreThreshold(0.0f)
+            .setBaseOptions(baseOptions)
+            .setRunningMode(RunningMode.AUDIO_CLIPS)
             .setMaxResults(521)
             .build()
-        val classifier = AudioClassifier.createFromFileAndOptions(context, "yamnet.tflite", options)
+        val classifier = AudioClassifier.createFromOptions(context, options)
         try {
-            val audioData = AudioData.create(AudioData.AudioDataFormat(SAMPLE_RATE, 1), WINDOW_SAMPLES)
-            try {
+            val format = AudioData.AudioDataFormat.builder()
+                .setNumOfChannels(1)
+                .setSampleRate(SAMPLE_RATE.toFloat())
+                .build()
+            val audioData = AudioData.create(format, WINDOW_SAMPLES)
+            run {
                 val totals = mutableMapOf<String, Float>()
                 val counts = mutableMapOf<String, Int>()
                 var start = 0
@@ -36,11 +46,13 @@ object YamnetAnalyzer {
                     System.arraycopy(samples, start, window, 0, length)
                     audioData.load(window)
                     val result = classifier.classify(audioData)
-                    result.classifications().firstOrNull()?.categories()?.forEach { category ->
-                        val name = category.categoryName()
-                        if (name.isNotBlank()) {
-                            totals[name] = (totals[name] ?: 0f) + category.score()
-                            counts[name] = (counts[name] ?: 0) + 1
+                    result.classificationResults().forEach { classificationResult ->
+                        classificationResult.classifications().firstOrNull()?.categories()?.forEach { category ->
+                            val name = category.categoryName()
+                            if (name.isNotBlank()) {
+                                totals[name] = (totals[name] ?: 0f) + category.score()
+                                counts[name] = (counts[name] ?: 0) + 1
+                            }
                         }
                     }
                     if (start + WINDOW_SAMPLES >= samples.size) break
@@ -69,8 +81,6 @@ object YamnetAnalyzer {
                     )
                 }
                 return Suggestion(best.first, best.second.coerceIn(0f, 1f))
-            } finally {
-                audioData.close()
             }
         } finally {
             classifier.close()
