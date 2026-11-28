@@ -829,7 +829,7 @@ private fun aiSuggestionStatus(display: String): String? {
     return when {
         title == "ngáy" -> "snore"
         title == "ho" -> "cough"
-        // Nhận diện tiếng nói không đồng nghĩa với nói mơ.
+        title.startsWith("tiếng nói") -> "talking"
         else -> null
     }
 }
