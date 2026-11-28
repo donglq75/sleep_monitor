@@ -189,6 +189,7 @@ private fun PlayerMonitorScreen(onReport: () -> Unit) {
     var playing by remember { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(false) }
     var monitorRunning by remember { mutableStateOf(prefs.getBoolean("monitor_running", false)) }
+    var monitorPaused by remember { mutableStateOf(prefs.getBoolean("monitor_paused", false)) }
     var message by remember { mutableStateOf("Chọn nhạc rồi nhấn Phát. Bạn cũng có thể giám sát mà không cần phát nhạc.") }
     var autoStart by remember { mutableStateOf(prefs.getBoolean("auto_start_after_music_5m", false)) }
     var autoStop by remember { mutableStateOf(prefs.getBoolean("auto_stop_on_report", true)) }
@@ -212,6 +213,7 @@ private fun PlayerMonitorScreen(onReport: () -> Unit) {
         try {
             ContextCompat.startForegroundService(context, intent)
             monitorRunning = true
+            monitorPaused = false
             message = "Đã khởi động giám sát. Dịch vụ tiếp tục chạy khi tắt màn hình."
         } catch (error: Exception) {
             message = "Không thể bật giám sát: ${error.localizedMessage ?: "hãy kiểm tra quyền microphone"}"
@@ -277,6 +279,7 @@ private fun PlayerMonitorScreen(onReport: () -> Unit) {
                                             try {
                                                 ContextCompat.startForegroundService(context, delayed)
                                                 monitorRunning = true
+                                                monitorPaused = false
                                                 message = "Đang phát · Giám sát sẽ tự bắt đầu sau 5 phút."
                                             } catch (error: Exception) {
                                                 message = "Không đặt được lịch giám sát: ${error.localizedMessage ?: "lỗi"}"
@@ -348,14 +351,37 @@ private fun PlayerMonitorScreen(onReport: () -> Unit) {
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (monitorRunning) "Giám sát đang bật" else "Giám sát đang tắt",
-                    style = MaterialTheme.typography.titleMedium)
-                if (monitorRunning) {
-                    OutlinedButton(onClick = {
-                        context.stopService(Intent(context, SleepMonitorService::class.java))
-                        monitorRunning = false
-                        message = "Đã dừng giám sát."
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Dừng giám sát") }
+                Text(
+                    when {
+                        monitorPaused -> "Giám sát đang tạm dừng"
+                        monitorRunning -> "Giám sát đang bật"
+                        else -> "Giám sát đang tắt"
+                    },
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (monitorRunning || monitorPaused) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = {
+                                val action = if (monitorPaused) SleepMonitorService.ACTION_RESUME else SleepMonitorService.ACTION_PAUSE
+                                context.startService(Intent(context, SleepMonitorService::class.java).setAction(action))
+                                monitorPaused = !monitorPaused
+                                monitorRunning = !monitorPaused
+                                message = if (monitorPaused) "Đã tạm dừng microphone. Bạn có thể tiếp tục từ thông báo bất cứ lúc nào."
+                                    else "Đã tiếp tục giám sát. App vẫn chạy khi khóa màn hình hoặc chuyển ứng dụng."
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text(if (monitorPaused) "Tiếp tục" else "Tạm dừng") }
+                        OutlinedButton(
+                            onClick = {
+                                context.startService(Intent(context, SleepMonitorService::class.java).setAction(SleepMonitorService.ACTION_STOP))
+                                monitorRunning = false
+                                monitorPaused = false
+                                message = "Đã kết thúc giám sát."
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Kết thúc") }
+                    }
                 } else {
                     Button(onClick = {
                         val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO)
