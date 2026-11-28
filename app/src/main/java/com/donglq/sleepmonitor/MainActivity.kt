@@ -51,6 +51,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.produceState
 import androidx.core.content.ContextCompat
@@ -387,6 +389,17 @@ private fun ReportScreen(onBack: () -> Unit) {
             file.nameWithoutExtension.substringAfter("event_", "").toLongOrNull()?.let { it to file }
         }.toMap()
     }
+    val aiSuggestions = remember {
+        mutableStateMapOf<Long, String>().apply {
+            prefs.getStringSet("event_timestamps", emptySet())?.forEach { value ->
+                value.toLongOrNull()?.let { timestamp ->
+                    prefs.getString("event_ai_$timestamp", null)?.let { put(timestamp, it) }
+                }
+            }
+        }
+    }
+    var aiRunning by remember { mutableStateOf<Long?>(null) }
+    val coroutineScope = rememberCoroutineScope()
     val statuses = remember {
         mutableStateMapOf<Long, String>().apply {
             prefs.getStringSet("event_timestamps", emptySet())?.forEach { value ->
