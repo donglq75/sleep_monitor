@@ -1,3 +1,5 @@
+import java.net.URL
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -72,11 +74,11 @@ val downloadYamnetModel by tasks.registering {
         val target = yamnetModelFile.asFile
         if (!target.exists() || target.length() < 1_000_000L) {
             target.parentFile.mkdirs()
-            val connection = java.net.URL(
+            val connection = URL(
                 "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite"
             ).openConnection().apply {
-                connectTimeout = 30_000
-                readTimeout = 120_000
+                setConnectTimeout(30_000)
+                setReadTimeout(120_000)
             }
             connection.getInputStream().use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
