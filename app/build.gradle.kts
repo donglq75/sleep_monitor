@@ -12,8 +12,8 @@ android {
         applicationId = "com.donglq.sleepmonitor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.1.8"
+        versionCode = 14
+        versionName = "1.1.9"
     }
 
     signingConfigs {
@@ -60,5 +60,29 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("com.google.mediapipe:tasks-audio:0.10.35")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+
+val yamnetModelFile = layout.projectDirectory.file("src/main/assets/yamnet.tflite")
+val downloadYamnetModel by tasks.registering {
+    outputs.file(yamnetModelFile)
+    doLast {
+        val target = yamnetModelFile.asFile
+        if (!target.exists() || target.length() < 1_000_000L) {
+            target.parentFile.mkdirs()
+            val connection = java.net.URL(
+                "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite"
+            ).openConnection().apply {
+                connectTimeout = 30_000
+                readTimeout = 120_000
+            }
+            connection.getInputStream().use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            check(target.length() > 1_000_000L) { "YAMNet model download was incomplete" }
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn(downloadYamnetModel) }
