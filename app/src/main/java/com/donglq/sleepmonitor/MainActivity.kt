@@ -408,6 +408,15 @@ private fun ReportScreen(onBack: () -> Unit) {
             }
         }
     }
+    val aiConfirmedStatuses = remember {
+        mutableStateMapOf<Long, String>().apply {
+            prefs.getStringSet("event_timestamps", emptySet())?.forEach { value ->
+                value.toLongOrNull()?.let { timestamp ->
+                    prefs.getString("event_ai_confirmed_$timestamp", null)?.let { put(timestamp, it) }
+                }
+            }
+        }
+    }
     var aiRunning by remember { mutableStateOf<Long?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val statuses = remember {
@@ -483,8 +492,10 @@ private fun ReportScreen(onBack: () -> Unit) {
 
     fun setStatus(timestamp: Long, status: String) {
         statuses[timestamp] = status
+        aiConfirmedStatuses.remove(timestamp)
         prefs.edit()
             .putString("event_status_$timestamp", status)
+            .remove("event_ai_confirmed_$timestamp")
             .putStringSet("event_timestamps", (prefs.getStringSet("event_timestamps", emptySet())?.toMutableSet() ?: mutableSetOf()).apply { add(timestamp.toString()) })
             .apply()
     }
@@ -715,6 +726,29 @@ private fun ReportScreen(onBack: () -> Unit) {
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.secondary)
                                 }
+                                val suggestedStatus = aiSuggestions[timestamp]?.let { aiSuggestionStatus(it) }
+                                if (suggestedStatus != null) {
+                                    val isAiConfirmed = aiConfirmedStatuses[timestamp] == suggestedStatus &&
+                                        statuses[timestamp] == suggestedStatus
+                                    OutlinedButton(
+                                        onClick = {
+                                            statuses[timestamp] = suggestedStatus
+                                            aiConfirmedStatuses[timestamp] = suggestedStatus
+                                            prefs.edit()
+                                                .putString("event_status_$timestamp", suggestedStatus)
+                                                .putString("event_ai_confirmed_$timestamp", suggestedStatus)
+                                                .apply()
+                                        },
+                                        enabled = !isAiConfirmed,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(if (isAiConfirmed) "Đã xác nhận AI" else "Xác nhận AI · " + when (suggestedStatus) {
+                                            "snore" -> "Ngáy"
+                                            "cough" -> "Ho"
+                                            else -> "Nói mơ"
+                                        })
+                                    }
+                                }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Checkbox(checked = status == "snore", onCheckedChange = { if (it) setStatus(timestamp, "snore") else if (status == "snore") setStatus(timestamp, "pending") })
@@ -790,6 +824,16 @@ private fun sleepWindowAnchor(timestamp: Long): Long? {
     calendar.set(java.util.Calendar.SECOND, 0)
     calendar.set(java.util.Calendar.MILLISECOND, 0)
     return calendar.timeInMillis
+}
+
+private fun aiSuggestionStatus(display: String): String? {
+    val title = display.substringBefore(" · ").trim().lowercase()
+    return when {
+        title == "ngáy" -> "snore"
+        title == "ho" -> "cough"
+        // Nhận diện tiếng nói không đồng nghĩa với nói mơ.
+        else -> null
+    }
 }
 
 private fun currentSleepWindowAnchor(now: Long = System.currentTimeMillis()): Long {
