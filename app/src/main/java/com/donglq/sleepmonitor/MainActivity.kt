@@ -579,22 +579,49 @@ private fun ReportScreen(onBack: () -> Unit) {
                                         }, style = MaterialTheme.typography.bodySmall)
                                     }
                                     if (file != null) {
-                                        Button(onClick = {
-                                            try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
-                                            activePlayer = MediaPlayer.create(context, Uri.fromFile(file))
-                                            if (activePlayer != null) {
-                                                playingName = timestamp
-                                                activePlayer?.setOnCompletionListener {
-                                                    try { it.release() } catch (_: Exception) { }
-                                                    activePlayer = null
-                                                    playingName = null
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Button(onClick = {
+                                                try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
+                                                activePlayer = MediaPlayer.create(context, Uri.fromFile(file))
+                                                if (activePlayer != null) {
+                                                    playingName = timestamp
+                                                    activePlayer?.setOnCompletionListener {
+                                                        try { it.release() } catch (_: Exception) { }
+                                                        activePlayer = null
+                                                        playingName = null
+                                                    }
+                                                    activePlayer?.start()
                                                 }
-                                                activePlayer?.start()
-                                            }
-                                        }) { Text(if (playingName == timestamp) "Đang phát" else "Nghe lại") }
+                                            }) { Text(if (playingName == timestamp) "Đang phát" else "Nghe lại") }
+                                            OutlinedButton(
+                                                enabled = aiRunning == null,
+                                                onClick = {
+                                                    aiRunning = timestamp
+                                                    coroutineScope.launch {
+                                                        try {
+                                                            val result = withContext(Dispatchers.IO) {
+                                                                YamnetAnalyzer.analyze(context, file)
+                                                            }
+                                                            val display = result.title + " · " + (result.confidence * 100).toInt() + "%"
+                                                            aiSuggestions[timestamp] = display
+                                                            prefs.edit().putString("event_ai_$timestamp", display).apply()
+                                                        } catch (error: Exception) {
+                                                            aiSuggestions[timestamp] = "Không phân tích được: " + (error.message ?: "lỗi mô hình")
+                                                        } finally {
+                                                            aiRunning = null
+                                                        }
+                                                    }
+                                                }
+                                            ) { Text(if (aiRunning == timestamp) "Đang phân tích…" else "AI phân tích") }
+                                        }
                                     } else {
                                         Text("Đã xóa clip", style = MaterialTheme.typography.labelSmall)
                                     }
+                                }
+                                aiSuggestions[timestamp]?.let { suggestion ->
+                                    Text("AI gợi ý (chưa xác nhận): " + suggestion,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.secondary)
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -629,7 +656,7 @@ private fun ReportScreen(onBack: () -> Unit) {
                 }
             }
         }
-        Text("Bộ phát hiện hiện chỉ ghi nhận âm thanh vượt ngưỡng, chưa tự phân biệt ngáy, nói mơ hay ho. Bạn nghe lại và chọn một loại; các lựa chọn được lưu riêng cho từng sự kiện.",
+        Text("AI dùng YAMNet để gợi ý loại âm thanh ngay trên điện thoại. AI không tự thay đổi checkbox; hãy nghe lại clip và xác nhận thủ công. Nhãn Speech chỉ có nghĩa là có tiếng nói, chưa đủ kết luận nói mơ.",
             style = MaterialTheme.typography.bodySmall)
     }
 
