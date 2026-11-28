@@ -436,6 +436,10 @@ private fun ReportScreen(onBack: () -> Unit) {
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var playingName by remember { mutableStateOf<Long?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var expandedArchiveYears by remember { mutableStateOf(setOf<String>()) }
+    var expandedArchiveMonths by remember { mutableStateOf(setOf<String>()) }
+    var expandedArchiveWeeks by remember { mutableStateOf(setOf<String>()) }
+    var expandedArchiveNights by remember { mutableStateOf(setOf<String>()) }
     var csvToExport by remember { mutableStateOf("") }
     val dateFormatter = remember { SimpleDateFormat("EEEE, dd/MM/yyyy", Locale.getDefault()) }
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
@@ -448,6 +452,15 @@ private fun ReportScreen(onBack: () -> Unit) {
             .toSortedMap(compareByDescending { it })
     }
     val nightTimestamps = remember(grouped) { grouped.values.flatten() }
+    val currentNightKey = remember {
+        dayKeyFormatter.format(Date(currentSleepWindowAnchor()))
+    }
+    val historicalGroups = remember(grouped, currentNightKey) {
+        grouped.filterKeys { it != currentNightKey }
+    }
+    val historyByYear = remember(historicalGroups) {
+        historicalGroups.keys.groupBy { it.substring(0, 4) }.toSortedMap(compareByDescending { it })
+    }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
@@ -487,7 +500,7 @@ private fun ReportScreen(onBack: () -> Unit) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("Tổng quan sự kiện", style = MaterialTheme.typography.titleMedium)
-                Text("Tổng cộng ${nightTimestamps.size} sự kiện trong khung 21:00–09:00 · Còn ${nightTimestamps.count { fileByTimestamp.containsKey(it) }} clip.")
+                Text("Toàn bộ lịch sử: ${nightTimestamps.size} sự kiện · Còn ${nightTimestamps.count { fileByTimestamp.containsKey(it) }} clip.")
                 Text("Ngáy: ${nightTimestamps.count { statuses[it] == "snore" }} · Nói mơ: ${nightTimestamps.count { statuses[it] == "talking" }} · Ho: ${nightTimestamps.count { statuses[it] == "cough" }}")
                 Text("Cần phân loại: ${nightTimestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
                 Text("Các kết luận được lưu riêng, không mất khi xóa clip.", style = MaterialTheme.typography.bodySmall)
@@ -505,7 +518,7 @@ private fun ReportScreen(onBack: () -> Unit) {
                     Text("🟣 Ho", style = MaterialTheme.typography.labelSmall)
                 }
                 if (grouped.isEmpty()) Text("Chưa có dữ liệu sự kiện.")
-                grouped.forEach { (dayKey, dayTimestamps) ->
+                grouped.filterKeys { it == currentNightKey }.forEach { (dayKey, dayTimestamps) ->
                     val nightDate = try { dayKeyFormatter.parse(dayKey) } catch (_: Exception) { null }
                     Text(nightDate?.let { "Đêm " + dateFormatter.format(it) } ?: "Đêm $dayKey",
                         style = MaterialTheme.typography.labelMedium)
@@ -564,7 +577,66 @@ private fun ReportScreen(onBack: () -> Unit) {
         if (grouped.isEmpty()) {
             Text("Chưa có sự kiện nào được ghi nhận.")
         } else {
-            grouped.forEach { (dayKey, dayTimestamps) ->
+            val currentNight = grouped[currentNightKey]
+            if (currentNight != null) {
+                Text("Đêm gần nhất", style = MaterialTheme.typography.titleMedium)
+            }
+            historyByYear.forEach { (year, yearNightKeys) ->
+                val yearExpanded = year in expandedArchiveYears
+                TextButton(
+                    onClick = {
+                        expandedArchiveYears = if (yearExpanded) expandedArchiveYears - year else expandedArchiveYears + year
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("${if (yearExpanded) "▾" else "▸"}  $year · ${yearNightKeys.size} đêm")
+                }
+                if (yearExpanded) {
+                    yearNightKeys.groupBy { it.substring(0, 7) }.toSortedMap(compareByDescending { it }).forEach { (monthKey, monthNightKeys) ->
+                        val monthExpanded = monthKey in expandedArchiveMonths
+                        TextButton(
+                            onClick = {
+                                expandedArchiveMonths = if (monthExpanded) expandedArchiveMonths - monthKey else expandedArchiveMonths + monthKey
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp)
+                        ) {
+                            Text("${if (monthExpanded) "▾" else "▸"}  Tháng ${monthKey.substring(5, 7)} · ${monthNightKeys.size} đêm")
+                        }
+                        if (monthExpanded) {
+                            monthNightKeys.groupBy { archiveWeekKey(it) }.toSortedMap(compareByDescending { it }).forEach { (weekKey, weekNightKeys) ->
+                                val weekExpanded = weekKey in expandedArchiveWeeks
+                                TextButton(
+                                    onClick = {
+                                        expandedArchiveWeeks = if (weekExpanded) expandedArchiveWeeks - weekKey else expandedArchiveWeeks + weekKey
+                                    },
+                                    modifier = Modifier.fillMaxWidth().padding(start = 26.dp)
+                                ) {
+                                    Text("${if (weekExpanded) "▾" else "▸"}  ${archiveWeekLabel(weekKey)} · ${weekNightKeys.size} đêm")
+                                }
+                                if (weekExpanded) {
+                                    weekNightKeys.sortedDescending().forEach { nightKey ->
+                                        val nightExpanded = nightKey in expandedArchiveNights
+                                        val nightDate = try { dayKeyFormatter.parse(nightKey) } catch (_: Exception) { null }
+                                        TextButton(
+                                            onClick = {
+                                                expandedArchiveNights = if (nightExpanded) expandedArchiveNights - nightKey else expandedArchiveNights + nightKey
+                                            },
+                                            modifier = Modifier.fillMaxWidth().padding(start = 40.dp)
+                                        ) {
+                                            Text("${if (nightExpanded) "▾" else "▸"}  ${nightDate?.let { dateFormatter.format(it) } ?: nightKey} · ${historicalGroups[nightKey]?.size ?: 0} sự kiện")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            val visibleNightKeys = buildSet {
+                if (currentNight != null) add(currentNightKey)
+                addAll(expandedArchiveNights)
+            }
+            grouped.filterKeys { it in visibleNightKeys }.forEach { (dayKey, dayTimestamps) ->
                 val dayDate = try { dayKeyFormatter.parse(dayKey) } catch (_: Exception) { null }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -706,6 +778,31 @@ private fun sleepWindowAnchor(timestamp: Long): Long? {
     calendar.set(java.util.Calendar.SECOND, 0)
     calendar.set(java.util.Calendar.MILLISECOND, 0)
     return calendar.timeInMillis
+}
+
+private fun currentSleepWindowAnchor(now: Long = System.currentTimeMillis()): Long {
+    val calendar = java.util.Calendar.getInstance().apply { timeInMillis = now }
+    val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour < 9 || hour in 9..20) calendar.add(java.util.Calendar.DAY_OF_MONTH, -1)
+    calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+    calendar.set(java.util.Calendar.MINUTE, 0)
+    calendar.set(java.util.Calendar.SECOND, 0)
+    calendar.set(java.util.Calendar.MILLISECOND, 0)
+    return calendar.timeInMillis
+}
+
+private fun archiveWeekKey(dayKey: String): String {
+    val calendar = java.util.Calendar.getInstance()
+    val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dayKey) ?: return dayKey
+    calendar.time = date
+    calendar.firstDayOfWeek = java.util.Calendar.MONDAY
+    calendar.minimalDaysInFirstWeek = 4
+    return "${calendar.get(java.util.Calendar.YEAR)}-${calendar.get(java.util.Calendar.MONTH) + 1}-W${calendar.get(java.util.Calendar.WEEK_OF_MONTH)}"
+}
+
+private fun archiveWeekLabel(weekKey: String): String {
+    val week = weekKey.substringAfterLast("W")
+    return "Tuần $week"
 }
 
 private fun formatDuration(milliseconds: Long): String {
