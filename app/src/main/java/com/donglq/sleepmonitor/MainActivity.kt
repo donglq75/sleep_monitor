@@ -464,8 +464,8 @@ private fun ReportScreen(onBack: () -> Unit) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("Tổng quan sự kiện", style = MaterialTheme.typography.titleMedium)
                 Text("Tổng cộng ${nightTimestamps.size} sự kiện trong khung 21:00–09:00 · Còn ${nightTimestamps.count { fileByTimestamp.containsKey(it) }} clip.")
-                Text("Ngáy: ${statuses.values.count { it == "snore" }} · Nói mơ: ${statuses.values.count { it == "talking" }} · Ho: ${statuses.values.count { it == "cough" }}")
-                Text("Không ngáy: ${statuses.values.count { it == "not_snore" }} · Chưa xác định: ${timestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
+                Text("Ngáy: ${nightTimestamps.count { statuses[it] == "snore" }} · Nói mơ: ${nightTimestamps.count { statuses[it] == "talking" }} · Ho: ${nightTimestamps.count { statuses[it] == "cough" }}")
+                Text("Không ngáy: ${nightTimestamps.count { statuses[it] == "not_snore" }} · Chưa xác định: ${nightTimestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
                 Text("Các kết luận được lưu riêng, không mất khi xóa clip.", style = MaterialTheme.typography.bodySmall)
             }
         }
