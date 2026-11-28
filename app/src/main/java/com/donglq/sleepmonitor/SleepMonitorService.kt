@@ -92,6 +92,11 @@ class SleepMonitorService : Service() {
     }
 
     private fun captureLoop() {
+        // Ban ngày không mở microphone; nếu bật trước 21:00 thì chờ đến khung giám sát.
+        while (running && !isInsideSleepWindow(System.currentTimeMillis())) {
+            try { Thread.sleep(30_000L) } catch (_: InterruptedException) { return }
+        }
+        if (!running) return
         val sampleRate = 16_000
         val minBuffer = AudioRecord.getMinBufferSize(
             sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
@@ -133,6 +138,7 @@ class SleepMonitorService : Service() {
         var cooldownUntil = 0L
 
         while (running && !Thread.currentThread().isInterrupted) {
+            if (!isInsideSleepWindow(System.currentTimeMillis())) break
             val count = try { audio.read(block, 0, block.size, AudioRecord.READ_BLOCKING) } catch (_: Exception) { -1 }
             if (count <= 0) continue
             val chunk = block.copyOf(count)
@@ -174,6 +180,16 @@ class SleepMonitorService : Service() {
         audio.release()
         if (recorder === audio) recorder = null
         eventBuffer?.let { saveWav(it.toByteArray(), eventTimestamp) }
+        if (running && !isInsideSleepWindow(System.currentTimeMillis())) {
+            stopCapture()
+            stopSelf()
+        }
+    }
+
+    private fun isInsideSleepWindow(timestamp: Long): Boolean {
+        val calendar = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        return hour >= 21 || hour < 9
     }
 
     private fun writePcm(out: ByteArrayOutputStream, samples: ShortArray) {
