@@ -634,7 +634,19 @@ private fun ReportScreen(onBack: () -> Unit) {
             }
             val visibleNightKeys = buildSet {
                 if (currentNight != null) add(currentNightKey)
-                addAll(expandedArchiveNights)
+                historyByYear.forEach { (year, yearNightKeys) ->
+                    if (year in expandedArchiveYears) {
+                        yearNightKeys.groupBy { it.substring(0, 7) }.forEach { (monthKey, monthNightKeys) ->
+                            if (monthKey in expandedArchiveMonths) {
+                                monthNightKeys.groupBy { archiveWeekKey(it) }.forEach { (weekKey, weekNightKeys) ->
+                                    if (weekKey in expandedArchiveWeeks) {
+                                        weekNightKeys.filter { it in expandedArchiveNights }.forEach { add(it) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             grouped.filterKeys { it in visibleNightKeys }.forEach { (dayKey, dayTimestamps) ->
                 val dayDate = try { dayKeyFormatter.parse(dayKey) } catch (_: Exception) { null }
@@ -797,7 +809,7 @@ private fun archiveWeekKey(dayKey: String): String {
     calendar.time = date
     calendar.firstDayOfWeek = java.util.Calendar.MONDAY
     calendar.minimalDaysInFirstWeek = 4
-    return "${calendar.get(java.util.Calendar.YEAR)}-${calendar.get(java.util.Calendar.MONTH) + 1}-W${calendar.get(java.util.Calendar.WEEK_OF_MONTH)}"
+    return "${calendar.get(java.util.Calendar.YEAR)}-${(calendar.get(java.util.Calendar.MONTH) + 1).toString().padStart(2, '0')}-W${calendar.get(java.util.Calendar.WEEK_OF_MONTH).toString().padStart(2, '0')}"
 }
 
 private fun archiveWeekLabel(weekKey: String): String {
