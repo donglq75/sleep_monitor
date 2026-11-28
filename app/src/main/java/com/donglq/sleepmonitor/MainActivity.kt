@@ -38,6 +38,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -398,13 +399,23 @@ private fun ReportScreen(onBack: () -> Unit) {
             }
         }
     }
+    val customDescriptions = remember {
+        mutableStateMapOf<Long, String>().apply {
+            prefs.getStringSet("event_timestamps", emptySet())?.forEach { value ->
+                value.toLongOrNull()?.let { timestamp ->
+                    prefs.getString("event_custom_$timestamp", null)?.let { put(timestamp, it) }
+                }
+            }
+        }
+    }
     var aiRunning by remember { mutableStateOf<Long?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val statuses = remember {
         mutableStateMapOf<Long, String>().apply {
             prefs.getStringSet("event_timestamps", emptySet())?.forEach { value ->
                 value.toLongOrNull()?.let { timestamp ->
-                    put(timestamp, prefs.getString("event_status_$timestamp", "pending") ?: "pending")
+                    val savedStatus = prefs.getString("event_status_$timestamp", "pending") ?: "pending"
+                    put(timestamp, if (savedStatus == "not_snore") "pending" else savedStatus)
                 }
             }
         }
@@ -478,7 +489,7 @@ private fun ReportScreen(onBack: () -> Unit) {
                 Text("Tổng quan sự kiện", style = MaterialTheme.typography.titleMedium)
                 Text("Tổng cộng ${nightTimestamps.size} sự kiện trong khung 21:00–09:00 · Còn ${nightTimestamps.count { fileByTimestamp.containsKey(it) }} clip.")
                 Text("Ngáy: ${nightTimestamps.count { statuses[it] == "snore" }} · Nói mơ: ${nightTimestamps.count { statuses[it] == "talking" }} · Ho: ${nightTimestamps.count { statuses[it] == "cough" }}")
-                Text("Không ngáy: ${nightTimestamps.count { statuses[it] == "not_snore" }} · Chưa xác định: ${nightTimestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
+                Text("Cần phân loại: ${nightTimestamps.count { statuses[it] == null || statuses[it] == "pending" }}")
                 Text("Các kết luận được lưu riêng, không mất khi xóa clip.", style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -508,7 +519,6 @@ private fun ReportScreen(onBack: () -> Unit) {
                             val x = size.width * (minutesFromStart / 720f)
                             val color = when (statuses[timestamp]) {
                                 "snore" -> Color(0xFF35C979)
-                                "not_snore" -> Color(0xFFB0B0B0)
                                 "talking" -> Color(0xFF42A5F5)
                                 "cough" -> Color(0xFFAB47BC)
                                 else -> Color(0xFFFFA726)
@@ -528,17 +538,16 @@ private fun ReportScreen(onBack: () -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = {
-                    val header = "Thoi_gian,Ngay,Gio,Trang_thai,Ten_trang_thai,Con_clip\n"
+                    val header = "Thoi_gian,Ngay,Gio,Trang_thai,Ten_trang_thai,Am_thanh_khac,Con_clip\n"
                     val rows = nightTimestamps.sorted().joinToString("") { timestamp ->
                         val status = statuses[timestamp] ?: "pending"
                         val label = when (status) {
                             "snore" -> "Ngáy"
-                            "not_snore" -> "Không ngáy"
                             "talking" -> "Nói mơ"
                             "cough" -> "Ho"
-                            else -> "Chưa xác định"
+                            else -> "Cần phân loại"
                         }
-                        "${timestamp},${dayKeyFormatter.format(Date(timestamp))},${timeFormatter.format(Date(timestamp))},${status},${label},${if (fileByTimestamp.containsKey(timestamp)) "Có" else "Không"}\n"
+                        "${timestamp},${dayKeyFormatter.format(Date(timestamp))},${timeFormatter.format(Date(timestamp))},${status},${csvEscape(label)},${csvEscape(customDescriptions[timestamp] ?: "")},${if (fileByTimestamp.containsKey(timestamp)) "Có" else "Không"}\n"
                     }
                     csvToExport = "\uFEFF" + header + rows
                     exportLauncher.launch("sleep_monitor_statistics.csv")
@@ -565,22 +574,19 @@ private fun ReportScreen(onBack: () -> Unit) {
                         dayTimestamps.forEachIndexed { index, timestamp ->
                             val file = fileByTimestamp[timestamp]
                             val status = statuses[timestamp] ?: "pending"
-                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Sự kiện ${dayTimestamps.size - index} · ${timeFormatter.format(Date(timestamp))}",
-                                            style = MaterialTheme.typography.bodyMedium)
-                                        Text(when (status) {
-                                            "snore" -> "Đã xác nhận: Ngáy"
-                                            "not_snore" -> "Đã xác nhận: Không ngáy"
-                                            "talking" -> "Đã xác nhận: Nói mơ"
-                                            "cough" -> "Đã xác nhận: Ho"
-                                            else -> "Đang nghi ngờ · Chưa xác định"
-                                        }, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    if (file != null) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Button(onClick = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Sự kiện ${dayTimestamps.size - index} · ${timeFormatter.format(Date(timestamp))}",
+                                    style = MaterialTheme.typography.titleSmall)
+                                Text(when (status) {
+                                    "snore" -> "Đã xác nhận: Ngáy"
+                                    "talking" -> "Đã xác nhận: Nói mơ"
+                                    "cough" -> "Đã xác nhận: Ho"
+                                    else -> "Cần phân loại"
+                                }, style = MaterialTheme.typography.bodySmall)
+                                if (file != null) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
                                                 try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
                                                 activePlayer = MediaPlayer.create(context, Uri.fromFile(file))
                                                 if (activePlayer != null) {
@@ -592,62 +598,68 @@ private fun ReportScreen(onBack: () -> Unit) {
                                                     }
                                                     activePlayer?.start()
                                                 }
-                                            }) { Text(if (playingName == timestamp) "Đang phát" else "Nghe lại") }
-                                            OutlinedButton(
-                                                enabled = aiRunning == null,
-                                                onClick = {
-                                                    aiRunning = timestamp
-                                                    coroutineScope.launch {
-                                                        try {
-                                                            val result = withContext(Dispatchers.IO) {
-                                                                YamnetAnalyzer.analyze(context, file)
-                                                            }
-                                                            val display = result.title + " · " + (result.confidence * 100).toInt() + "%"
-                                                            aiSuggestions[timestamp] = display
-                                                            prefs.edit().putString("event_ai_$timestamp", display).apply()
-                                                        } catch (error: Exception) {
-                                                            aiSuggestions[timestamp] = "Không phân tích được: " + (error.message ?: "lỗi mô hình")
-                                                        } finally {
-                                                            aiRunning = null
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text(if (playingName == timestamp) "Đang phát" else "Nghe lại") }
+                                        OutlinedButton(
+                                            enabled = aiRunning == null,
+                                            onClick = {
+                                                aiRunning = timestamp
+                                                coroutineScope.launch {
+                                                    try {
+                                                        val result = withContext(Dispatchers.IO) {
+                                                            YamnetAnalyzer.analyze(context, file)
                                                         }
+                                                        val display = result.title + " · " + (result.confidence * 100).toInt() + "%"
+                                                        aiSuggestions[timestamp] = display
+                                                        prefs.edit().putString("event_ai_$timestamp", display).apply()
+                                                    } catch (error: Exception) {
+                                                        aiSuggestions[timestamp] = "Không phân tích được: " + (error.message ?: "lỗi mô hình")
+                                                    } finally {
+                                                        aiRunning = null
                                                     }
                                                 }
-                                            ) { Text(if (aiRunning == timestamp) "Đang phân tích…" else "AI phân tích") }
-                                        }
-                                    } else {
-                                        Text("Đã xóa clip", style = MaterialTheme.typography.labelSmall)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text(if (aiRunning == timestamp) "Đang phân tích…" else "AI phân tích") }
                                     }
+                                } else {
+                                    Text("Đã xóa clip", style = MaterialTheme.typography.labelSmall)
                                 }
                                 aiSuggestions[timestamp]?.let { suggestion ->
                                     Text("AI gợi ý (chưa xác nhận): " + suggestion,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.secondary)
                                 }
-                                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(checked = status == "snore", onCheckedChange = { if (it) setStatus(timestamp, "snore") else if (status == "snore") setStatus(timestamp, "pending") })
-                                            Text("Ngáy", style = MaterialTheme.typography.bodyMedium)
-                                        }
-                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(checked = status == "not_snore", onCheckedChange = { if (it) setStatus(timestamp, "not_snore") else if (status == "not_snore") setStatus(timestamp, "pending") })
-                                            Text("Không ngáy", style = MaterialTheme.typography.bodyMedium)
-                                        }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = status == "snore", onCheckedChange = { if (it) setStatus(timestamp, "snore") else if (status == "snore") setStatus(timestamp, "pending") })
+                                        Text("Ngáy")
                                     }
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(checked = status == "talking", onCheckedChange = { if (it) setStatus(timestamp, "talking") else if (status == "talking") setStatus(timestamp, "pending") })
-                                            Text("Nói mơ", style = MaterialTheme.typography.bodyMedium)
-                                        }
-                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(checked = status == "cough", onCheckedChange = { if (it) setStatus(timestamp, "cough") else if (status == "cough") setStatus(timestamp, "pending") })
-                                            Text("Ho", style = MaterialTheme.typography.bodyMedium)
-                                        }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = status == "talking", onCheckedChange = { if (it) setStatus(timestamp, "talking") else if (status == "talking") setStatus(timestamp, "pending") })
+                                        Text("Nói mơ")
                                     }
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = status == "cough", onCheckedChange = { if (it) setStatus(timestamp, "cough") else if (status == "cough") setStatus(timestamp, "pending") })
+                                        Text("Ho")
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Checkbox(checked = status == "pending", onCheckedChange = { if (it) setStatus(timestamp, "pending") })
-                                        Text("Chưa xác định", style = MaterialTheme.typography.bodyMedium)
+                                        Text("Cần phân loại")
                                     }
+                                }
+                                if (status == "pending" || !customDescriptions[timestamp].isNullOrBlank()) {
+                                    OutlinedTextField(
+                                        value = customDescriptions[timestamp] ?: "",
+                                        onValueChange = { value ->
+                                            customDescriptions[timestamp] = value
+                                            prefs.edit().putString("event_custom_$timestamp", value).apply()
+                                        },
+                                        label = { Text("Âm thanh khác (quạt, còi xe, sấm…)") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
                                 }
                             }
                             if (index < dayTimestamps.lastIndex) androidx.compose.material3.HorizontalDivider()
@@ -656,7 +668,7 @@ private fun ReportScreen(onBack: () -> Unit) {
                 }
             }
         }
-        Text("AI dùng YAMNet để gợi ý loại âm thanh ngay trên điện thoại. AI không tự thay đổi checkbox; hãy nghe lại clip và xác nhận thủ công. Nhãn Speech chỉ có nghĩa là có tiếng nói, chưa đủ kết luận nói mơ.",
+        Text("AI dùng YAMNet để gợi ý loại âm thanh ngay trên điện thoại. AI không tự thay đổi phân loại; hãy nghe lại clip và xác nhận. Phần trăm là độ tin cậy của mô hình, không phải kết luận chắc chắn. Có thể nhập tên âm thanh khác để bổ sung dữ liệu.",
             style = MaterialTheme.typography.bodySmall)
     }
 
@@ -664,7 +676,7 @@ private fun ReportScreen(onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("Xóa toàn bộ clip âm thanh?") },
-            text = { Text("Sẽ xóa ${allFiles.size} tệp WAV để giải phóng dung lượng. Mốc thời gian và kết quả Ngáy/Không ngáy vẫn được giữ trong báo cáo. Nên xuất CSV trước khi xóa nếu bạn muốn lưu bản thống kê bên ngoài.") },
+            text = { Text("Sẽ xóa ${allFiles.size} tệp WAV để giải phóng dung lượng. Mốc thời gian, phân loại và ghi chú âm thanh vẫn được giữ trong báo cáo. Nên xuất CSV trước khi xóa nếu bạn muốn lưu bản thống kê bên ngoài.") },
             confirmButton = {
                 TextButton(onClick = {
                     try { activePlayer?.stop(); activePlayer?.release() } catch (_: Exception) { }
@@ -681,6 +693,8 @@ private fun ReportScreen(onBack: () -> Unit) {
         )
     }
 }
+
+private fun csvEscape(value: String): String = "\"" + value.replace("\"", "\"\"") + "\""
 
 private fun sleepWindowAnchor(timestamp: Long): Long? {
     val calendar = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
