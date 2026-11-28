@@ -21,6 +21,7 @@ import kotlin.math.sqrt
 
 class SleepMonitorService : Service() {
     @Volatile private var running = false
+    @Volatile private var paused = false
     private var recorder: AudioRecord? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var worker: Thread? = null
@@ -28,47 +29,35 @@ class SleepMonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopCapture()
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopCapture()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_PAUSE -> {
+                pauseCapture()
+                return START_NOT_STICKY
+            }
+            ACTION_RESUME -> {
+                if (paused) startCapture()
+                return START_NOT_STICKY
+            }
         }
-        if (!running) startCapture(intent?.getLongExtra(EXTRA_DELAY_MS, 0L) ?: 0L)
+        if (!running && !paused) startCapture(intent?.getLongExtra(EXTRA_DELAY_MS, 0L) ?: 0L)
         return START_NOT_STICKY
     }
 
     private fun startCapture(delayMs: Long = 0L) {
         createChannel()
-        val openApp = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val notification: Notification = if (Build.VERSION.SDK_INT >= 26) {
-            Notification.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("Sleep Monitor đang giám sát")
-                .setContentText(if (delayMs > 0) "Sẽ bắt đầu phân tích sau 5 phút · Chỉ lưu đoạn sự kiện" else "Đang phân tích âm thanh từ microphone · Chỉ lưu đoạn sự kiện")
-                .setContentIntent(openApp)
-                .setOngoing(true)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("Sleep Monitor đang giám sát")
-                .setContentText(if (delayMs > 0) "Sẽ bắt đầu sau 5 phút" else "Chỉ lưu đoạn âm thanh sự kiện")
-                .setContentIntent(openApp)
-                .setOngoing(true)
-                .build()
-        }
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(NOTIFICATION_ID, buildNotification(false),
+            if (Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
 
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean("monitor_running", true).putLong("monitor_started_at", System.currentTimeMillis()).apply()
+        prefs.edit().putBoolean("monitor_running", true)
+            .putBoolean("monitor_paused", false)
+            .putLong("monitor_started_at", System.currentTimeMillis()).apply()
+        paused = false
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SleepMonitor::Capture").also {
             it.setReferenceCounted(false)
@@ -89,6 +78,58 @@ class SleepMonitorService : Service() {
                 captureLoop()
             }
         }, "SleepMonitor-Audio").also { it.start() }
+    }
+
+    private fun pauseCapture() {
+        if (paused) return
+        running = false
+        paused = true
+        try { recorder?.stop() } catch (_: Exception) { }
+        worker?.interrupt()
+        try { worker?.join(500) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        worker = null
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) { }
+        wakeLock = null
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("monitor_running", false)
+            .putBoolean("monitor_paused", true)
+            .apply()
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, buildNotification(true))
+    }
+
+    private fun buildNotification(isPaused: Boolean): Notification {
+        val openApp = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        builder.setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentTitle(if (isPaused) "Sleep Monitor đang tạm dừng" else "Sleep Monitor đang giám sát")
+            .setContentText(if (isPaused) "Microphone đã ngừng · Chạm Tiếp tục khi chuẩn bị ngủ" else "Đang phân tích âm thanh · Chỉ lưu đoạn sự kiện")
+            .setContentIntent(openApp)
+            .setOngoing(true)
+        val action = if (isPaused) ACTION_RESUME else ACTION_PAUSE
+        val actionLabel = if (isPaused) "Tiếp tục" else "Tạm dừng"
+        val actionIcon = if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
+        val actionIntent = PendingIntent.getService(
+            this, if (isPaused) 7104 else 7103,
+            Intent(this, SleepMonitorService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        builder.addAction(Notification.Action.Builder(actionIcon, actionLabel, actionIntent).build())
+        val stopIntent = PendingIntent.getService(
+            this, 7105,
+            Intent(this, SleepMonitorService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        builder.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Kết thúc", stopIntent).build())
+        return builder.build()
     }
 
     private fun captureLoop() {
@@ -229,6 +270,7 @@ class SleepMonitorService : Service() {
 
     private fun stopCapture() {
         running = false
+        paused = false
         try { recorder?.stop() } catch (_: Exception) { }
         worker?.interrupt()
         worker = null
@@ -236,6 +278,7 @@ class SleepMonitorService : Service() {
         wakeLock = null
         getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean("monitor_running", false)
+            .putBoolean("monitor_paused", false)
             .putLong("monitor_stopped_at", System.currentTimeMillis())
             .apply()
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else {
@@ -260,6 +303,8 @@ class SleepMonitorService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.donglq.sleepmonitor.STOP_MONITOR"
+        const val ACTION_PAUSE = "com.donglq.sleepmonitor.PAUSE_MONITOR"
+        const val ACTION_RESUME = "com.donglq.sleepmonitor.RESUME_MONITOR"
         const val EXTRA_DELAY_MS = "extra_delay_ms"
         const val PREFS = "sleep_monitor_preferences"
         private const val CHANNEL_ID = "sleep_monitor_capture"
